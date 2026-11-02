@@ -66,15 +66,17 @@ window.FIREBASE_CONFIG = {
 
 ## Archivos
 
+Todos los archivos están en una sola carpeta, sin subcarpetas, para poder subirlos a GitHub de una vez.
+
 | Archivo | Para qué sirve |
 |---|---|
 | `index.html` | Página principal |
 | `firebase-config.js` | Configuración de Firebase (rellenar) |
 | `firestore.rules` | Reglas de seguridad (pegar en Firebase) |
-| `assets/seed.js` | Calendario inicial 2026-27, cargado desde el PDF oficial |
-| `assets/js/*.js` | Lógica de la web y del panel |
-| `assets/css/styles.css` | Diseño |
-| `assets/img/` y `favicon.ico` | Logo e icono |
+| `seed.js` | Calendario inicial 2026-27, cargado desde el PDF oficial |
+| `api.js`, `league.js`, `app.js`, `admin.js` | Lógica de la web y del panel |
+| `styles.css` | Diseño |
+| `logo.png`, `logo-192.png`, `logo-512.png`, `logo-data.js`, `favicon.ico` | Logo e icono |
 
 ## Límites del plan gratuito de Firebase
 
