@@ -1,4 +1,4 @@
-# Liga Opinión Futsal Sevilla · Web
+# Liga Opinión Futsal Sevilla · Web 
 
 La web es estática y se aloja gratis en **GitHub Pages**. Los datos (resultados, equipos, jugadores y cuentas) se guardan en **Firebase**, que también es gratuito. Así, lo que guarda un gestor lo ven todos los visitantes al momento, sin recargar la página.
 
