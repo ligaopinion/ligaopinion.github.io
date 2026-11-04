@@ -8,15 +8,17 @@ La versión actual se muestra en el pie de página de la web. Al pulsarla, y tam
 
 ### Copa Opinión Success
 - Nueva sección **Copa** en el menú principal.
-- **Cuadro de copa** por rondas (Ronda preliminar, Octavos de final, Cuartos de final, Semifinales y Final), con escudos, marcador, penaltis y el equipo clasificado resaltado.
+- **Cuadro de copa** con el formato oficial: Ronda 1 (A-D), Octavos 1 (A-D), Octavos 2 (E-H), Cuartos (C1 = A-B, C2 = C-D, C3 = E-F, C4 = G-H), Semifinal (S1 = C1-C2, S2 = C3-C4) y Final (S1-S2). Muestra escudos, marcador, penaltis y el equipo clasificado resaltado.
+- **Clasificados automáticos**: en Cuartos, Semifinal y Final aparece "Ganador A", "Ganador C1"…, que se sustituye solo por el equipo en cuanto se anota el resultado del cruce de origen.
+- **Temporada 2026-27**: al crear la copa se carga el cuadro oficial, con los cruces de la Ronda 1 (Bohemia - Nottingham, Parkinaso - Flor de Caña, Tendereke - Pañoleta y Real Élite - Marañas) y las fechas y horas de todas las rondas.
 - Al pulsar un partido jugado se abre su **resumen**: goleadores, amonestaciones, expulsiones y penaltis.
 - **Rankings de copa**: top 5 máximos goleadores y top 5 equipos menos goleados.
 - **Instantáneas** del cuadro completo (la imagen se adapta al ancho de todas las rondas) y de los dos rankings.
 - La portada muestra también los partidos de copa del fin de semana, si los hay.
 
 ### Administración de la copa (*Admin › Copa*)
-- Botón **Crear copa de esta temporada**: crea las rondas vacías con los equipos de la temporada en curso, con ascensos, descensos y equipos nuevos ya aplicados.
-- Los equipos de cada cruce se eligen **a mano** con un selector agrupado por división. En cada ronda, ★ marca a los clasificados de la anterior.
+- Botón **Crear copa de esta temporada**: crea el cuadro con los equipos de la temporada en curso, con ascensos, descensos y equipos nuevos ya aplicados.
+- Los equipos de la Ronda 1 y de los Octavos se eligen **a mano** con un selector agrupado por división. ★ marca a los clasificados de la ronda anterior. Cada cruce tiene su código editable.
 - Mismo editor que en liga para goles, amarillas y expulsiones, más **penaltis** obligatorios si hay empate.
 - Las rondas se pueden **renombrar, añadir o eliminar**, y a cada ronda se le pueden añadir o quitar partidos.
 - Al iniciar una temporada nueva, la copa anterior se **archiva** junto a la liga y se consulta con el selector de temporada.

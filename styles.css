@@ -660,3 +660,5 @@ footer.site img { width: 34px; border-radius: 50%; vertical-align: middle; margi
 .fines-tbl th.grp { border-left: 1px solid var(--outline); }
 .fines-tbl th[rowspan] { vertical-align: middle; }
 .kpi-cards .card-ico { margin: 0 14px 0 5px; }
+
+.blabel { display: inline-grid; place-items: center; min-width: 22px; height: 18px; padding: 0 5px; margin-right: 6px; border-radius: 6px; background: var(--brand-navy); color: #fff; font: 800 11px/1 var(--font); letter-spacing: .3px; }

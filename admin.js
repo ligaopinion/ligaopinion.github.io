@@ -146,6 +146,7 @@ const Admin = {
       case 'season-del': this.deleteSeason(el.dataset.id); break;
       case 'cup-create': this.createCup(); break;
       case 'round-add': this.addRound(); break;
+      case 'cup-delete': this.deleteCup(); break;
       case 'round-del': this.deleteRound(el.dataset.r); break;
       case 'cm-add': this.addCupMatch(el.dataset.r); break;
       case 'cm-edit': this.openMatch(el.dataset.id, el.dataset.r); break;
@@ -207,11 +208,15 @@ const Admin = {
     };
     const m = this.ed.m;
     const isCup = !!round;
-    // En copa: todos los equipos de la temporada, agrupados por división; ★ = ganador de la ronda anterior.
+    // En copa: todos los equipos de la temporada, agrupados por división; ★ = clasificado de la ronda anterior.
     const prevWinners = new Set();
     if (isCup) {
+      // Los cruces enlazados (cuartos, semis, final) se rellenan con los ganadores de sus cruces de origen.
+      if (!m.home) m.home = L.cupSide(m, 'home');
+      if (!m.away) m.away = L.cupSide(m, 'away');
       const i = L.d.cup.rounds.indexOf(round);
-      if (i > 0) L.d.cup.rounds[i - 1].matches.forEach(x => { const w = L.cupWinner(x); if (w) prevWinners.add(w); });
+      const prev = m.src ? [L.cupSrc(m, 'home'), L.cupSrc(m, 'away')].filter(Boolean).map(h => h.m) : i > 0 ? L.d.cup.rounds[i - 1].matches : [];
+      prev.forEach(x => { const w = L.cupWinner(x); if (w) prevWinners.add(w); });
     }
     const opt = (t, sel) => `<option value="${t.id}" ${t.id === sel ? 'selected' : ''}>${prevWinners.has(t.id) ? '★ ' : ''}${esc(t.name)}</option>`;
     const teamOpts = (sel) => `<option value="">— Elegir equipo —</option>` + (isCup
@@ -221,7 +226,7 @@ const Admin = {
     const d = Dlg.open(`${Dlg.head(isCup ? `Copa · ${esc(round.name)}` : src ? 'Editar partido' : 'Nuevo partido', badge)}
       <div class="dlg-body">
         <div class="form-grid" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));margin-bottom:16px">
-          ${isCup ? '' : `<label class="field"><span>División</span><select id="edDiv"><option value="1" ${m.div === 1 ? 'selected' : ''}>1ª División</option><option value="2" ${m.div === 2 ? 'selected' : ''}>2ª División</option></select></label>
+          ${isCup ? `<label class="field"><span>Código del cruce</span><input id="edLabel" value="${esc(m.label || '')}" maxlength="8" placeholder="A, B, C1…"></label>` : `<label class="field"><span>División</span><select id="edDiv"><option value="1" ${m.div === 1 ? 'selected' : ''}>1ª División</option><option value="2" ${m.div === 2 ? 'selected' : ''}>2ª División</option></select></label>
           <label class="field"><span>Jornada</span><input id="edJ" type="number" min="1" max="60" value="${m.j}"></label>`}
           <label class="field"><span>Fecha</span><input id="edDate" type="date" value="${m.date}"></label>
           <label class="field"><span>Hora</span><input id="edTime" type="time" value="${m.time}"></label>
@@ -237,7 +242,7 @@ const Admin = {
         ${isCup ? `<div class="form-grid" style="margin-bottom:16px">
           <label class="field"><span>Penaltis local (solo si hay empate)</span><input id="edPh" type="number" min="0" max="99" value="${m.pen ? m.pen.h : ''}" inputmode="numeric"></label>
           <label class="field"><span>Penaltis visitante (solo si hay empate)</span><input id="edPa" type="number" min="0" max="99" value="${m.pen ? m.pen.a : ''}" inputmode="numeric"></label>
-        </div>${prevWinners.size ? '<p class="muted" style="margin:-6px 0 14px;font-size:12.5px">★ Equipo clasificado en la ronda anterior</p>' : ''}` : ''}
+        </div>${m.src ? `<p class="muted" style="margin:-6px 0 14px;font-size:12.5px">Este cruce lo juegan el <b>${esc(L.cupSrcText(m, 'home'))}</b> y el <b>${esc(L.cupSrcText(m, 'away'))}</b>; se rellenan solos cuando esos partidos tienen resultado.</p>` : ''}${prevWinners.size ? '<p class="muted" style="margin:-6px 0 14px;font-size:12.5px">★ Equipo clasificado en la ronda anterior</p>' : ''}` : ''}
         <div id="edScore"></div>
         <div id="edCols" class="ed-cols" style="margin-top:16px"></div>
       </div>
@@ -250,6 +255,7 @@ const Admin = {
     d.dataset.modal = '1';
     d.addEventListener('close', () => { delete d.dataset.modal; }, { once: true });
 
+    if (isCup) $('#edLabel').addEventListener('input', e => { m.label = e.target.value.trim().toUpperCase(); });
     if (!isCup) {
       $('#edDiv').addEventListener('change', e => {
         m.div = +e.target.value; m.home = ''; m.away = ''; m.ev = { h: {}, a: {}, hx: 0, ax: 0 };
@@ -394,7 +400,7 @@ const Admin = {
     const cup = L.d.cup, isAdmin = Api.user.role === 'admin';
     if (!cup) {
       return `<div class="card-pad" style="display:grid;gap:16px;justify-items:start">
-        <div class="alert info" style="margin:0"><span class="ms">emoji_events</span><p>La <b>${DIV_NAME.c}</b> se crea una vez por temporada y participan <b>todos los equipos de la temporada actual</b> (${L.teams(1).length} de 1ª y ${L.teams(2).length} de 2ª), con sus ascensos, descensos y equipos nuevos ya aplicados. Se crean las rondas ${CUP_TEMPLATE.map(([n, k]) => `${n} (${k})`).join(', ')}; después eliges los equipos de cada cruce.</p></div>
+        <div class="alert info" style="margin:0"><span class="ms">emoji_events</span><p>La <b>${DIV_NAME.c}</b> se crea una vez por temporada y participan <b>todos los equipos de la temporada actual</b> (${L.teams(1).length} de 1ª y ${L.teams(2).length} de 2ª), con sus ascensos, descensos y equipos nuevos ya aplicados. Se crean las rondas ${CUP_TEMPLATE.map(r => `${r.name} (${r.labels.length})`).join(', ')}. Cuartos, Semifinal y Final se rellenan solos con los ganadores de cada cruce.${CUP_PRESETS[L.d.settings.season] ? ` Para <b>${esc(L.d.settings.season)}</b> se carga además el cuadro oficial: cruces de la Ronda 1 y todas las fechas.` : ''}</p></div>
         ${isAdmin ? '<button class="btn btn-filled" data-act="cup-create"><span class="ms">emoji_events</span>Crear copa de esta temporada</button>' : '<p class="muted" style="margin:0">Pide a un administrador que cree la copa de esta temporada.</p>'}
       </div>`;
     }
@@ -407,11 +413,14 @@ const Admin = {
         <button class="icon-btn" data-act="round-del" data-r="${r.id}" title="Eliminar ronda" style="color:var(--loss)"><span class="ms">delete</span></button>` : ''}
       </div>
       ${r.matches.map(m => {
-        const h = m.home ? L.team(m.home) : null, a = m.away ? L.team(m.away) : null, sc = L.score(m);
+        const hid = L.cupSide(m, 'home'), aid = L.cupSide(m, 'away');
+        const h = hid ? L.team(hid) : null, a = aid ? L.team(aid) : null, sc = L.score(m);
+        const ph = side => `<i class="muted">${esc(L.cupSrcText(m, side) || 'Por definir')}</i>`;
         return `<div class="list-row clickable" data-act="cm-edit" data-r="${r.id}" data-id="${m.id}">
+          ${m.label ? `<b class="blabel" style="height:24px;min-width:30px;font-size:12px">${esc(m.label)}</b>` : ''}
           <div style="text-align:center;min-width:58px"><b style="font-family:var(--font-display);font-size:16px">${m.time ? esc(m.time) : '--:--'}</b><div class="muted" style="font-size:11px">${m.date ? `${D.dayShort(m.date)} ${D.dm(m.date)}` : 'Sin fecha'}</div></div>
           ${h ? shieldImg(h) : '<span class="shield ph" style="width:32px;height:32px"></span>'}
-          <div class="grow"><b>${h ? esc(h.short || h.name) : '<i class="muted">Por definir</i>'} <span class="muted" style="font-weight:400">vs</span> ${a ? esc(a.short || a.name) : '<i class="muted">Por definir</i>'}</b><span class="tag ${m.status}">${st[m.status]}</span></div>
+          <div class="grow"><b>${h ? esc(h.short || h.name) : ph('home')} <span class="muted" style="font-weight:400">vs</span> ${a ? esc(a.short || a.name) : ph('away')}</b><span class="tag ${m.status}">${st[m.status]}</span></div>
           ${a ? shieldImg(a) : '<span class="shield ph" style="width:32px;height:32px"></span>'}
           <b style="font:800 20px var(--font-display);min-width:58px;text-align:center">${sc ? `${sc.h}-${sc.a}${m.pen ? `<small class="muted" style="display:block;font:600 10px var(--font)">${m.pen.h}-${m.pen.a} pen.</small>` : ''}` : '–'}</b>
           <span class="ms muted">edit</span>
@@ -422,17 +431,30 @@ const Admin = {
         <span class="div-badge sm dc"><span class="ms fill">emoji_events</span></span><b style="font:800 20px var(--font-display);text-transform:uppercase">${esc(cup.name)}</b>
         <span class="spacer"></span>
         <a class="btn btn-text btn-sm" href="#/copa"><span class="ms">account_tree</span>Ver cuadro</a>
-        ${isAdmin ? '<button class="btn btn-outline btn-sm" data-act="round-add"><span class="ms">add</span>Añadir ronda</button>' : ''}
+        ${isAdmin ? '<button class="btn btn-outline btn-sm" data-act="round-add"><span class="ms">add</span>Añadir ronda</button><button class="btn btn-danger btn-sm" data-act="cup-delete"><span class="ms">delete</span>Eliminar copa</button>' : ''}
       </div>
       <div class="alert info" style="margin:16px 16px 0"><span class="ms">touch_app</span><p>Pulsa un partido para elegir sus equipos, fecha y hora, y anotar el resultado con goleadores, amonestaciones y expulsiones. Si hay empate, indica los penaltis. En cada ronda, ★ marca los equipos clasificados en la anterior.</p></div>
       ${rounds}`;
   },
 
   async createCup() {
-    if (!await Dlg.confirm(`¿Crear la <b>${DIV_NAME.c}</b> de <b>${esc(L.d.settings.season)}</b> con ${L.d.teams.length} equipos? Se crearán las rondas vacías para elegir los cruces.`, 'Crear copa', false)) return;
+    const season = L.d.settings.season;
+    const hasPreset = !!CUP_PRESETS[season];
+    if (!await Dlg.confirm(`¿Crear la <b>${DIV_NAME.c}</b> de <b>${esc(season)}</b> con ${L.d.teams.length} equipos?<br><br>${hasPreset
+      ? 'Se cargará el <b>cuadro oficial</b> de esta temporada: cruces de la Ronda 1 y fechas y horas de todas las rondas. Después elige los equipos de Octavos 1 y Octavos 2.'
+      : 'Se creará el cuadro (Ronda 1, Octavos 1 y 2, Cuartos, Semifinal y Final) para que elijas los equipos y las fechas.'}`, 'Crear copa', false)) return;
     await App.commit(d => {
-      d.cup = { name: DIV_NAME.c, rounds: CUP_TEMPLATE.map(([name, n]) => ({ id: L.uid('r'), name, matches: Array.from({ length: n }, () => L.newCupMatch()) })) };
-    }, 'Copa creada. Ahora elige los equipos de la ronda preliminar.');
+      const cup = L.buildCup(season, d.teams);
+      delete cup.preset;
+      d.cup = cup;
+    }, hasPreset ? 'Copa creada con el cuadro oficial. Elige ahora los equipos de los octavos.' : 'Copa creada. Ahora elige los equipos de la Ronda 1.');
+  },
+
+  // Para empezar de nuevo (por ejemplo, si se creó con un formato equivocado).
+  async deleteCup() {
+    const played = L.cupMatches().filter(m => L.played(m)).length;
+    if (!await Dlg.confirm(`¿Eliminar la copa de <b>${esc(L.d.settings.season)}</b>${played ? ` con <b>${played} partidos ya jugados</b> (se perderán sus resultados y estadísticas)` : ''}? Después podrás volver a crearla.`, 'Eliminar copa')) return;
+    await App.commit(d => { d.cup = null; }, 'Copa eliminada');
   },
 
   async addRound() {

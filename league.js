@@ -28,8 +28,28 @@ const D = {
 
 const DIV_NAME = { 1: 'Primera División', 2: 'Segunda División', c: 'Copa Opinión Success' };
 const DIV_TAG = { 1: '1ª', 2: '2ª', c: 'C' };
-// Rondas con las que se crea la copa de cada temporada (se pueden renombrar, añadir o quitar).
-const CUP_TEMPLATE = [['Ronda preliminar', 4], ['Octavos de final', 8], ['Cuartos de final', 4], ['Semifinales', 2], ['Final', 1]];
+// Formato de la copa (cuadro oficial). Cada cruce tiene un código; "from" indica de qué cruces
+// salen sus dos equipos (ganadores): [ronda, código local, ronda, código visitante].
+const CUP_TEMPLATE = [
+  { name: 'Ronda 1', labels: ['A', 'B', 'C', 'D'] },
+  { name: 'Octavos 1', labels: ['A', 'B', 'C', 'D'] },
+  { name: 'Octavos 2', labels: ['E', 'F', 'G', 'H'] },
+  { name: 'Cuartos', labels: ['C1', 'C2', 'C3', 'C4'], from: [[1, 'A', 1, 'B'], [1, 'C', 1, 'D'], [2, 'E', 2, 'F'], [2, 'G', 2, 'H']] },
+  { name: 'Semifinal', labels: ['S1', 'S2'], from: [[3, 'C1', 3, 'C2'], [3, 'C3', 3, 'C4']] },
+  { name: 'Final', labels: ['FINAL'], from: [[4, 'S1', 4, 'S2']] }
+];
+// Cuadro ya sorteado de una temporada: equipos de la Ronda 1 y fechas/horas de cada cruce.
+const CUP_PRESETS = {
+  'Temporada 2026-27': [
+    [['BOHEMIA FC', 'NOTTINGHAM HUEVOS', '2026-11-13', '19:00'], ['PARKINASO FC', 'FLOR DE CAÑA ALJARAFE', '2026-11-13', '20:00'],
+      ['TENDEREKE', 'PAÑOLETA CD', '2026-11-20', '19:00'], ['REAL ÉLITE FC', 'MARAÑAS F.S', '2026-11-20', '20:00']],
+    [['', '', '2026-11-27', '19:00'], ['', '', '2026-11-27', '20:00'], ['', '', '2026-12-18', '19:00'], ['', '', '2026-12-18', '20:00']],
+    [['', '', '2027-01-15', '19:00'], ['', '', '2027-01-15', '20:00'], ['', '', '2027-01-22', '19:00'], ['', '', '2027-01-22', '20:00']],
+    [['', '', '2027-02-12', '19:00'], ['', '', '2027-02-12', '20:00'], ['', '', '2027-02-19', '19:00'], ['', '', '2027-02-19', '20:00']],
+    [['', '', '2027-03-12', '19:00'], ['', '', '2027-03-12', '20:00']],
+    [['', '', '2027-04-02', '19:00']]
+  ]
+};
 const DEFAULT_LEAGUE = 'Liga Success Opinión Futsal Sevilla';
 
 const L = {
@@ -78,8 +98,29 @@ const L = {
     m.status = m.status || 'pending';
   },
 
-  newCupMatch() {
-    return { id: L.uid('c'), cup: true, date: '', time: '', home: '', away: '', status: 'pending', ev: { h: {}, a: {}, hx: 0, ax: 0 }, pen: null };
+  newCupMatch(label = '') {
+    return { id: L.uid('c'), cup: true, label, src: null, date: '', time: '', home: '', away: '', status: 'pending', ev: { h: {}, a: {}, hx: 0, ax: 0 }, pen: null };
+  },
+
+  // Crea la copa de la temporada con el formato oficial (y el cuadro ya sorteado si existe).
+  buildCup(season, teams) {
+    const preset = CUP_PRESETS[season];
+    const byName = name => (teams.find(t => t.name.toUpperCase() === name.toUpperCase()) || {}).id || '';
+    const rounds = CUP_TEMPLATE.map((r, ri) => ({
+      id: L.uid('r'), name: r.name,
+      matches: r.labels.map((lb, mi) => {
+        const m = L.newCupMatch(lb);
+        const p = preset && preset[ri] && preset[ri][mi];
+        if (p) { m.home = p[0] ? byName(p[0]) : ''; m.away = p[1] ? byName(p[1]) : ''; m.date = p[2]; m.time = p[3]; }
+        return m;
+      })
+    }));
+    // Enlaza cada cruce con los cruces de los que salen sus equipos.
+    CUP_TEMPLATE.forEach((r, ri) => (r.from || []).forEach(([rh, lh, ra, la], mi) => {
+      const find = (rIdx, lb) => (rounds[rIdx].matches.find(x => x.label === lb) || {}).id || null;
+      rounds[ri].matches[mi].src = { h: find(rh, lh), a: find(ra, la) };
+    }));
+    return { name: DIV_NAME.c, rounds, preset: !!preset };
   },
 
   uid(prefix) { return prefix + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); },
@@ -204,6 +245,21 @@ const L = {
     if (s.h !== s.a) return s.h > s.a ? m.home : m.away;
     if (m.pen && m.pen.h !== m.pen.a) return m.pen.h > m.pen.a ? m.home : m.away;
     return null;
+  },
+  // Equipo de un lado del cruce: el elegido a mano o, si no hay, el ganador del cruce del que procede.
+  cupSide(m, side) {
+    if (m[side]) return m[side];
+    const hit = this.cupSrc(m, side);
+    return hit ? (this.cupWinner(hit.m) || '') : '';
+  },
+  cupSrc(m, side) {
+    const id = m.src && m.src[side === 'home' ? 'h' : 'a'];
+    return id ? this.cupFind(id) : null;
+  },
+  // Texto para un hueco aún sin equipo: "Ganador A", "Ganador C1"...
+  cupSrcText(m, side) {
+    const hit = this.cupSrc(m, side);
+    return hit ? `Ganador ${hit.m.label || hit.r.name}` : '';
   },
   cupScorers(n = 5) {
     return this.totalsOf(this.cupMatches()).filter(t => t.g > 0)

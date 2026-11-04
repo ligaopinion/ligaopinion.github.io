@@ -20,8 +20,8 @@ const APP_VERSION = '1.1';
 const CHANGELOG = [
   {
     v: '1.1', date: '2026-11-04', items: [
-      ['emoji_events', 'Nueva sección <b>Copa Opinión Success</b> en el menú, con el cuadro de rondas (preliminar, octavos, cuartos, semifinales y final).'],
-      ['account_tree', 'Cuadro de copa con marcador, penaltis y resumen de cada partido. Se puede capturar como imagen.'],
+      ['emoji_events', 'Nueva sección <b>Copa Opinión Success</b> en el menú, con el cuadro oficial: Ronda 1, Octavos 1, Octavos 2, Cuartos, Semifinal y Final.'],
+      ['account_tree', 'Cuadro de copa con código de cada cruce (A, B… C1, S1), marcador, penaltis y resumen de cada partido. Cuartos, semifinales y final se rellenan solos con los ganadores. Se puede capturar como imagen.'],
       ['sports_soccer', 'Rankings de copa: top 5 goleadores y top 5 equipos menos goleados, con instantánea.'],
       ['admin_panel_settings', 'Admin › Copa: crear la copa de cada temporada con sus equipos, elegir los equipos de cada cruce y anotar goles, amonestaciones, expulsiones y penaltis.'],
       ['payments', 'Admin › Sanciones: recuento económico por equipo de amarillas y expulsiones, con columnas separadas de <b>liga</b> y <b>copa</b> y el total acumulado de la temporada. Importes configurables, detalle por partido, instantánea y descarga en Excel.'],
@@ -338,17 +338,18 @@ function viewStats() {
 /* ---------------- Copa ---------------- */
 function cupCard(m) {
   const sc = L.score(m), w = L.cupWinner(m);
-  const side = (id, goals, pen) => {
+  const side = (key, goals, pen) => {
+    const id = L.cupSide(m, key);
     const t = id ? L.team(id) : null;
     const cls = w ? (w === id ? 'win' : 'lose') : '';
     return `<div class="bteam ${cls}">${t ? shieldImg(t) : '<span class="shield ph"></span>'}
-      <span class="tname">${t ? esc(t.short || t.name) : '<i>Por definir</i>'}</span>
+      <span class="tname">${t ? esc(t.short || t.name) : `<i>${esc(L.cupSrcText(m, key) || 'Por definir')}</i>`}</span>
       <b>${sc ? goals : ''}${sc && m.pen ? `<small>(${pen})</small>` : ''}</b></div>`;
   };
-  const meta = m.status === 'postponed' ? 'Aplazado' : m.date ? `${D.dayShort(m.date)} ${D.dm(m.date)}${m.time ? ' · ' + esc(m.time) : ''}` : 'Fecha por definir';
+  const when = m.status === 'postponed' ? 'Aplazado' : m.date ? `${D.dayShort(m.date)} ${D.dm(m.date)}${m.time ? ' · ' + esc(m.time) : ''}` : 'Fecha por definir';
   return `<div class="bmatch ${sc ? 'played' : ''}" ${sc ? `data-sum="${m.id}" title="Ver resumen"` : ''}>
-    <div class="bmeta"><span>${meta}</span>${sc ? '<span class="ms">summarize</span>' : ''}</div>
-    ${side(m.home, sc && sc.h, m.pen && m.pen.h)}${side(m.away, sc && sc.a, m.pen && m.pen.a)}
+    <div class="bmeta"><span>${m.label && m.label !== 'FINAL' ? `<b class="blabel">${esc(m.label)}</b>` : ''}${when}</span>${sc ? '<span class="ms">summarize</span>' : ''}</div>
+    ${side('home', sc && sc.h, m.pen && m.pen.h)}${side('away', sc && sc.a, m.pen && m.pen.a)}
   </div>`;
 }
 
