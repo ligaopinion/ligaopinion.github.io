@@ -9,10 +9,40 @@ const NAV = [
   { id: 'inicio', label: 'Inicio', icon: 'home' },
   { id: 'primera', label: '1ª División', icon: 'looks_one' },
   { id: 'segunda', label: '2ª División', icon: 'looks_two' },
-  { id: 'estadisticas', label: 'Estadísticas', icon: 'leaderboard' },
+  { id: 'copa', label: 'Copa', icon: 'emoji_events' },
+  { id: 'estadisticas', label: 'Estadísticas', short: 'Rankings', icon: 'leaderboard' },
   { id: 'admin', label: 'Admin', icon: 'admin_panel_settings' }
 ];
 const PAGE_DIV = { primera: 1, segunda: 2 };
+
+/* ---------------- Versión y novedades ---------------- */
+const APP_VERSION = '1.1';
+const CHANGELOG = [
+  {
+    v: '1.1', date: '2026-11-04', items: [
+      ['emoji_events', 'Nueva sección <b>Copa Opinión Success</b> en el menú, con el cuadro de rondas (preliminar, octavos, cuartos, semifinales y final).'],
+      ['account_tree', 'Cuadro de copa con marcador, penaltis y resumen de cada partido. Se puede capturar como imagen.'],
+      ['sports_soccer', 'Rankings de copa: top 5 goleadores y top 5 equipos menos goleados, con instantánea.'],
+      ['admin_panel_settings', 'Admin › Copa: crear la copa de cada temporada con sus equipos, elegir los equipos de cada cruce y anotar goles, amonestaciones, expulsiones y penaltis.'],
+      ['payments', 'Admin › Sanciones: recuento económico por equipo de amarillas y expulsiones, con columnas separadas de <b>liga</b> y <b>copa</b> y el total acumulado de la temporada. Importes configurables, detalle por partido, instantánea y descarga en Excel.'],
+      ['restart_alt', 'Las tarjetas se reinician con cada temporada nueva; las de temporadas anteriores se consultan en Sanciones con el selector de temporada.'],
+      ['history', 'Al iniciar una temporada nueva, la copa de la anterior queda archivada junto a la liga.'],
+      ['new_releases', 'Número de versión en el pie de página y este registro de novedades.']
+    ]
+  },
+  {
+    v: '1.0', date: '2026-11-02', items: [
+      ['rocket_launch', 'Primera versión: portada, 1ª y 2ª División con jornadas y clasificación, estadísticas, instantáneas para redes, panel de administración, usuarios y temporadas.']
+    ]
+  }
+];
+function openChangelog() {
+  Dlg.open(`${Dlg.head('Novedades', '<span class="ms" style="color:var(--primary)">new_releases</span>')}
+    <div class="dlg-body" style="padding:0">${CHANGELOG.map(c => `<div class="sum-section" style="border-top:0">
+      <h3 style="color:var(--on-surface)">Versión ${c.v} <small class="muted" style="font:500 13px var(--font);text-transform:none">· ${esc(D.fmt(c.date, { day: 'numeric', month: 'long', year: 'numeric' }))}</small></h3>
+      <ul class="changes">${c.items.map(([ic, t]) => `<li><span class="ms">${ic}</span><span>${t}</span></li>`).join('')}</ul></div>`).join('')}</div>
+    <div class="dlg-foot"><button class="btn btn-filled" data-act="close">Cerrar</button></div>`, 'narrow');
+}
 const DIV_PAGE = { 1: 'primera', 2: 'segunda' };
 
 /* ---------------- Escudos ---------------- */
@@ -74,13 +104,15 @@ function matchRow(m) {
   let mid = '<div class="mscore vs">VS</div>';
   let res = ['', ''];
   if (sc) {
-    mid = `<div class="mscore">${sc.h}<i>-</i>${sc.a}</div>`;
-    res = sc.h > sc.a ? ['win', 'lose'] : sc.h < sc.a ? ['lose', 'win'] : ['', ''];
+    mid = `<div class="mscore">${sc.h}<i>-</i>${sc.a}${m.pen ? `<small class="pen">${m.pen.h}-${m.pen.a} pen.</small>` : ''}</div>`;
+    const w = m.cup ? L.cupWinner(m) : (sc.h > sc.a ? m.home : sc.h < sc.a ? m.away : null);
+    res = w === m.home ? ['win', 'lose'] : w === m.away ? ['lose', 'win'] : ['', ''];
   } else if (m.status === 'postponed') {
     mid = '<div class="mscore post">APLAZADO</div>';
   }
-  return `<div class="match d${m.div}">
-    <div class="mdiv" title="${DIV_NAME[m.div]}">${DIV_TAG[m.div]}<small>DIV</small></div>
+  const dk = m.cup ? 'c' : m.div;
+  return `<div class="match d${dk}">
+    <div class="mdiv" title="${DIV_NAME[dk]}">${m.cup ? '<span class="ms fill" style="font-size:20px">emoji_events</span><small>COPA</small>' : `${DIV_TAG[dk]}<small>DIV</small>`}</div>
     <div class="mbody">
       <div class="mtime">${esc(m.time)}<small>${D.dayShort(m.date)} ${D.dm(m.date)}</small></div>
       <div class="mteam home ${res[0]}"><span class="tname">${teamName(h)}</span>${shieldImg(h)}</div>
@@ -104,8 +136,8 @@ function matchList(ms, emptyMsg = 'No hay partidos programados.') {
   return html;
 }
 
-const shotBtn = (target, title, sub = '') =>
-  `<button class="btn btn-outline btn-sm" data-act="shot" data-target="${target}" data-title="${esc(title)}" data-sub="${esc(sub)}"><span class="ms">photo_camera</span>Capturar instantánea</button>`;
+const shotBtn = (target, title, sub = '', wide = false) =>
+  `<button class="btn btn-outline btn-sm" data-act="shot" data-target="${target}" data-title="${esc(title)}" data-sub="${esc(sub)}"${wide ? ' data-wide="1"' : ''}><span class="ms">photo_camera</span>Capturar instantánea</button>`;
 
 function standingsTable(div) {
   const rows = L.standings(div);
@@ -139,6 +171,21 @@ const archivedNotice = () => App.season && App.archive
   : '';
 
 /* ---------------- Vistas ---------------- */
+// Partidos de copa del mismo fin de semana (solo si los hay).
+function cupWeekCard(w) {
+  const ms = L.cupMatches().filter(m => m.date && m.date >= w.from && m.date <= w.to && m.home && m.away).sort(L.byDate);
+  if (!ms.length) return '';
+  const range = D.range(w.from, w.to);
+  return `<div class="card">
+    <div id="shot-week-c">
+      <div class="card-head"><span class="div-badge dc"><span class="ms fill">emoji_events</span></span>
+        <div class="grow"><h3>${esc(L.d.cup.name)}</h3><p>${esc(range)}</p></div></div>
+      <div class="match-list">${matchList(ms)}</div>
+    </div>
+    <div class="card-actions"><a class="btn btn-text btn-sm" href="#/copa"><span class="ms">account_tree</span>Ver cuadro</a>${shotBtn('shot-week-c', L.d.cup.name, range)}</div>
+  </div>`;
+}
+
 function viewHome() {
   const s = L.d.settings;
   const w = L.weekWindow();
@@ -182,8 +229,8 @@ function viewHome() {
     </section>
 
     <h2 class="section-title"><span class="ms">event</span>Partidos de la semana<small>${esc(weekRange)}</small></h2>
-    <div class="legend"><span><i style="background:var(--div1)"></i>1ª División</span><span><i style="background:var(--div2)"></i>2ª División</span><span class="muted">· Cualquier equipo puede jugar sábado o domingo</span></div>
-    ${w ? `<div class="stack">${weekCard(1)}${weekCard(2)}</div>` : `<div class="card"><div class="empty"><span class="ms">sports_soccer</span>${L.d.matches.length ? 'La temporada ha terminado. ¡Gracias por participar!' : 'El calendario de la nueva temporada se publicará muy pronto.'}</div></div>`}
+    <div class="legend"><span><i style="background:var(--div1)"></i>1ª División</span><span><i style="background:var(--div2)"></i>2ª División</span><span><i style="background:var(--cup)"></i>Copa</span><span class="muted">· Cualquier equipo puede jugar sábado o domingo</span></div>
+    ${w ? `<div class="stack">${weekCard(1)}${weekCard(2)}${cupWeekCard(w)}</div>` :`<div class="card"><div class="empty"><span class="ms">sports_soccer</span>${L.d.matches.length ? 'La temporada ha terminado. ¡Gracias por participar!' : 'El calendario de la nueva temporada se publicará muy pronto.'}</div></div>`}
 
     <h2 class="section-title"><span class="ms">contact_support</span>Contacto y redes sociales</h2>
     <div class="contact-grid">
@@ -288,9 +335,47 @@ function viewStats() {
   </div>`;
 }
 
+/* ---------------- Copa ---------------- */
+function cupCard(m) {
+  const sc = L.score(m), w = L.cupWinner(m);
+  const side = (id, goals, pen) => {
+    const t = id ? L.team(id) : null;
+    const cls = w ? (w === id ? 'win' : 'lose') : '';
+    return `<div class="bteam ${cls}">${t ? shieldImg(t) : '<span class="shield ph"></span>'}
+      <span class="tname">${t ? esc(t.short || t.name) : '<i>Por definir</i>'}</span>
+      <b>${sc ? goals : ''}${sc && m.pen ? `<small>(${pen})</small>` : ''}</b></div>`;
+  };
+  const meta = m.status === 'postponed' ? 'Aplazado' : m.date ? `${D.dayShort(m.date)} ${D.dm(m.date)}${m.time ? ' · ' + esc(m.time) : ''}` : 'Fecha por definir';
+  return `<div class="bmatch ${sc ? 'played' : ''}" ${sc ? `data-sum="${m.id}" title="Ver resumen"` : ''}>
+    <div class="bmeta"><span>${meta}</span>${sc ? '<span class="ms">summarize</span>' : ''}</div>
+    ${side(m.home, sc && sc.h, m.pen && m.pen.h)}${side(m.away, sc && sc.a, m.pen && m.pen.a)}
+  </div>`;
+}
+
+function viewCup() {
+  const cup = L.d.cup;
+  const head = `<div class="page-head"><span class="div-badge dc"><span class="ms fill">emoji_events</span></span>
+      <div><h1>${esc(cup ? cup.name : DIV_NAME.c)}</h1><p>${esc(L.d.settings.season)} · Todos los equipos de la liga</p></div>${seasonPicker()}</div>
+    ${archivedNotice()}`;
+  if (!cup || !cup.rounds.length) {
+    return `<div class="fade-in">${head}<div class="card"><div class="empty"><span class="ms">emoji_events</span>El cuadro de la copa de esta temporada se publicará muy pronto.</div></div></div>`;
+  }
+  const rounds = cup.rounds.map(r => `<div class="bround"><h4>${esc(r.name)}</h4><div class="bms">${r.matches.map(cupCard).join('') || '<div class="empty" style="padding:12px">—</div>'}</div></div>`).join('');
+  return `<div class="fade-in">${head}
+    <div class="card">
+      <div class="card-head"><span class="ms" style="color:var(--gold)">account_tree</span><div class="grow"><h3>Cuadro de la copa</h3><p>Pulsa un partido jugado para ver su resumen</p></div></div>
+      <div class="bracket-wrap"><div class="bracket" id="shot-cup">${rounds}</div></div>
+      <div class="card-actions">${shotBtn('shot-cup', `Cuadro · ${cup.name}`, L.d.settings.season, true)}</div>
+    </div>
+    <h2 class="section-title"><span class="ms">sports_soccer</span>Rankings de copa</h2>
+    <div class="grid-2">${rankCard('shot-csc', 'Máximos goleadores', 'c', L.cupScorers(), 'goals')}${rankCard('shot-cgc', 'Menos goleados', 'c', L.cupConceded(), 'conceded')}</div>
+  </div>`;
+}
+
 /* ---------------- Resumen de partido ---------------- */
 function openSummary(id) {
-  const m = L.d.matches.find(x => x.id === id);
+  const cupHit = L.cupFind(id);
+  const m = cupHit ? cupHit.m : L.d.matches.find(x => x.id === id);
   if (!m) return;
   const h = L.team(m.home), a = L.team(m.away), sc = L.score(m), det = L.details(m);
   const li = (x, n, mark) => `<li>${mark}${esc(x.p.name)}${n > 1 ? ` <b>×${n}</b>` : ''}</li>`;
@@ -304,22 +389,24 @@ function openSummary(id) {
       ${col(det.h[key], key === 'goals' ? 'g' : key === 'yellow' ? 'y' : 'r', mark, withExtra ? det.h.extra : 0, false)}
       ${col(det.a[key], key === 'goals' ? 'g' : key === 'yellow' ? 'y' : 'r', mark, withExtra ? det.a.extra : 0, true)}
     </div></div>`;
-  const title = `${DIV_NAME[m.div]} · Jornada ${m.j}`;
-  Dlg.open(`${Dlg.head('Resumen del partido', `<span class="div-badge sm d${m.div}">${DIV_TAG[m.div]}</span>`)}
+  const title = cupHit ? `${L.d.cup.name} · ${cupHit.r.name}` : `${DIV_NAME[m.div]} · Jornada ${m.j}`;
+  const badge = cupHit ? '<span class="div-badge sm dc"><span class="ms fill" style="font-size:18px">emoji_events</span></span>' : `<span class="div-badge sm d${m.div}">${DIV_TAG[m.div]}</span>`;
+  Dlg.open(`${Dlg.head('Resumen del partido', badge)}
     <div class="dlg-body" style="padding:0">
       <div id="shot-summary" style="background:var(--surface)">
         <div class="summary-score">
           <div class="t">${shieldImg(h, 'lg')}<span>${esc(h.name)}</span></div>
           <div class="s">${sc ? `${sc.h} - ${sc.a}` : 'VS'}</div>
           <div class="t">${shieldImg(a, 'lg')}<span>${esc(a.name)}</span></div>
-          <div class="meta">${esc(title)} · ${esc(D.dayLong(m.date))} · ${esc(m.time)}</div>
+          ${m.pen ? `<div class="meta" style="font-size:14px;color:#fff">Penaltis: ${m.pen.h} - ${m.pen.a}</div>` : ''}
+          <div class="meta">${esc(title)}${m.date ? ' · ' + esc(D.dayLong(m.date)) : ''}${m.time ? ' · ' + esc(m.time) : ''}</div>
         </div>
         ${section('Goles y goleadores', '<span class="ms">sports_soccer</span>', 'goals', ball, true)}
         ${section('Amonestaciones', '<span class="card-ico y"></span>', 'yellow', yc, false)}
         ${section('Expulsiones', '<span class="card-ico r"></span>', 'red', rc, false)}
       </div>
     </div>
-    <div class="dlg-foot">${shotBtn('shot-summary', `${h.short || h.name} ${sc ? sc.h + '-' + sc.a : ''} ${a.short || a.name}`, `${title} · ${D.dm(m.date)}`)}<button class="btn btn-filled btn-sm" data-act="close">Cerrar</button></div>`, '');
+    <div class="dlg-foot">${shotBtn('shot-summary', `${h.short || h.name} ${sc ? sc.h + '-' + sc.a : ''} ${a.short || a.name}`, `${title}${m.date ? ' · ' + D.dm(m.date) : ''}`)}<button class="btn btn-filled btn-sm" data-act="close">Cerrar</button></div>`, '');
 }
 
 /* ---------------- Instantánea (imagen para redes) ---------------- */
@@ -341,7 +428,7 @@ function rasterize(src, size = 160) {
   });
 }
 
-async function snapshot(targetId, title, sub) {
+async function snapshot(targetId, title, sub, wide = false) {
   const src = document.getElementById(targetId);
   if (!src) return;
   if (!window.html2canvas) { snack('No se pudo cargar el módulo de captura. Revisa la conexión.', 'error'); return; }
@@ -361,11 +448,15 @@ async function snapshot(targetId, title, sub) {
   // html2canvas no pinta bien imágenes SVG: se pasan a PNG antes de capturar.
   await Promise.all($$('img', clone).filter(i => i.src.startsWith('data:image/svg')).map(async i => { i.src = await rasterize(i.src); }));
   poster.querySelector('.poster-body').append(clone);
+  // El cuadro de copa es ancho: la imagen se adapta a todas sus rondas.
+  const width = wide ? Math.max(760, src.scrollWidth + 56) : 760;
+  poster.style.width = width + 'px';
+  if (wide) poster.classList.add('wide');
   document.body.append(poster, scrim);
   try {
     await Promise.all($$('img', poster).map(img => img.complete ? Promise.resolve() : new Promise(r => { img.onload = img.onerror = r; })));
     if (document.fonts && document.fonts.ready) await document.fonts.ready;
-    const canvas = await html2canvas(poster, { scale: 2, backgroundColor: '#0b1520', useCORS: true, logging: false, windowWidth: 1200, scrollX: 0, scrollY: 0 });
+    const canvas = await html2canvas(poster, { scale: 2, backgroundColor: '#0b1520', useCORS: true, logging: false, windowWidth: Math.max(1200, width + 40), scrollX: 0, scrollY: 0 });
     const blob = await new Promise(r => canvas.toBlob(r, 'image/png'));
     showShot(blob, title);
   } catch (e) {
@@ -474,7 +565,7 @@ const App = {
 
   renderNav() {
     const item = (n, bottom) => bottom
-      ? `<a href="#/${n.id}" data-nav="${n.id}"><span class="pill"><span class="ms">${n.icon}</span></span>${n.label.replace(' División', '')}</a>`
+      ? `<a href="#/${n.id}" data-nav="${n.id}"><span class="pill"><span class="ms">${n.icon}</span></span>${n.short || n.label.replace(' División', '')}</a>`
       : `<a href="#/${n.id}" data-nav="${n.id}"><span class="ms">${n.icon}</span><span class="lbl">${n.label}</span></a>`;
     $('#topnav').innerHTML = NAV.map(n => item(n, false)).join('');
     $('#bottomnav').innerHTML = NAV.map(n => item(n, true)).join('');
@@ -485,16 +576,18 @@ const App = {
     if (!L.d) return;
     const { page } = this.route;
     // Las temporadas archivadas solo se consultan en divisiones y estadísticas; portada y admin usan siempre la actual.
-    const useArchive = this.season && this.archive && (PAGE_DIV[page] || page === 'estadisticas');
+    const useArchive = this.season && this.archive && (PAGE_DIV[page] || page === 'estadisticas' || page === 'copa');
     if (useArchive) L.load(this.archive.data, this.archive.shields);
     else L.load(Api.state.data, Api.state.shields);
     $$('[data-nav]').forEach(a => a.classList.toggle('active', a.dataset.nav === page));
     $('#footSeason').textContent = L.d.settings.season || '';
+    $('.ver-link').textContent = 'Versión ' + APP_VERSION;
     document.title = (page === 'inicio' ? '' : (NAV.find(n => n.id === page).label + ' · ')) + 'Liga Opinión Futsal Sevilla';
     const v = $('#view');
     if (page === 'inicio') v.innerHTML = viewHome();
     else if (PAGE_DIV[page]) v.innerHTML = viewDivision(PAGE_DIV[page]);
     else if (page === 'estadisticas') v.innerHTML = viewStats();
+    else if (page === 'copa') v.innerHTML = viewCup();
     else if (page === 'admin') { v.innerHTML = Admin.view(); Admin.after(); }
     this.after();
   },
@@ -525,13 +618,19 @@ const App = {
 
   bindGlobal() {
     document.addEventListener('click', e => {
+      // Partidos del cuadro de copa (atributo propio para que la instantánea no los elimine).
+      const sum = e.target.closest('[data-sum]');
+      if (sum) return openSummary(sum.dataset.sum);
+      const fine = e.target.closest('[data-fine]');
+      if (fine) return Admin.openFineDetail(fine.dataset.fine);
       const el = e.target.closest('[data-act]');
       if (!el) return;
       const act = el.dataset.act;
       if (act === 'close') { const d = el.closest('dialog'); if (d) d.close(); return; }
       if (act === 'summary') return openSummary(el.dataset.id);
       if (act === 'season-current') { e.preventDefault(); return this.setSeason(null); }
-      if (act === 'shot') return snapshot(el.dataset.target, el.dataset.title, el.dataset.sub);
+      if (act === 'shot') return snapshot(el.dataset.target, el.dataset.title, el.dataset.sub, el.dataset.wide === '1');
+      if (act === 'changelog') return openChangelog();
       if (act === 'jgo') {
         const div = PAGE_DIV[this.route.page];
         if (div && el.dataset.j !== 'undefined') this.go(`#/${DIV_PAGE[div]}/${el.dataset.j}`, true);

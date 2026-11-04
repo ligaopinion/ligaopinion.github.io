@@ -16,7 +16,9 @@ const Admin = {
   tabs() {
     const t = [
       { id: 'partidos', label: 'Partidos y resultados', icon: 'scoreboard' },
-      { id: 'equipos', label: 'Equipos y jugadores', icon: 'groups' }
+      { id: 'copa', label: 'Copa', icon: 'emoji_events' },
+      { id: 'equipos', label: 'Equipos y jugadores', icon: 'groups' },
+      { id: 'sanciones', label: 'Sanciones', icon: 'payments' }
     ];
     if (Api.user && Api.user.role === 'admin') {
       t.push({ id: 'temporadas', label: 'Temporadas', icon: 'history' });
@@ -33,7 +35,7 @@ const Admin = {
     const tabs = this.tabs();
     if (App.route.sub && tabs.some(t => t.id === App.route.sub)) this.tab = App.route.sub;
     if (!tabs.some(t => t.id === this.tab)) this.tab = 'partidos';
-    const body = { partidos: () => this.viewMatches(), equipos: () => this.viewTeams(), temporadas: () => this.viewSeasons(), usuarios: () => this.viewUsers(), ajustes: () => this.viewSettings(), cuenta: () => this.viewAccount() }[this.tab]();
+    const body = { partidos: () => this.viewMatches(), equipos: () => this.viewTeams(), copa: () => this.viewCupAdmin(), sanciones: () => this.viewFines(), temporadas: () => this.viewSeasons(), usuarios: () => this.viewUsers(), ajustes: () => this.viewSettings(), cuenta: () => this.viewAccount() }[this.tab]();
     return `<div class="fade-in">
       <div class="page-head"><span class="div-badge d1" style="background:var(--secondary)"><span class="ms">admin_panel_settings</span></span>
         <div><h1>Administración</h1><p>Los cambios se publican al instante en toda la web</p></div></div>
@@ -41,6 +43,7 @@ const Admin = {
       <div class="card">
         <div class="admin-user"><span class="avatar">${esc(u.username[0])}</span>
           <div style="flex:1;min-width:0"><b>${esc(u.username)}</b><div><span class="tag ${u.role}">${ROLE_LABEL[u.role]}</span></div></div>
+          <button class="btn btn-text btn-sm" data-act="changelog"><span class="ms">new_releases</span>Novedades v${APP_VERSION}</button>
           <button class="btn btn-outline btn-sm" data-act="logout"><span class="ms">logout</span>Cerrar sesión</button></div>
         <div class="admin-tabs" role="tablist">${tabs.map(t => `<button data-act="atab" data-tab="${t.id}" class="${t.id === this.tab ? 'active' : ''}"><span class="ms">${t.icon}</span>${t.label}</button>`).join('')}</div>
         <div id="adminBody">${body}</div>
@@ -89,6 +92,9 @@ const Admin = {
     if (pf) pf.addEventListener('submit', e => { e.preventDefault(); this.changePw(pf); });
     const uf = $('#userForm');
     if (uf) uf.addEventListener('submit', e => { e.preventDefault(); this.createUser(uf); });
+    $$('[data-round-name]').forEach(i => i.addEventListener('change', () => this.renameRound(i.dataset.roundName, i.value)));
+    const fs = $('#fineSeason');
+    if (fs) fs.addEventListener('change', () => this.setFineSeason(fs.value));
     const imp = $('#importFile');
     if (imp) imp.addEventListener('change', () => this.importBackup(imp));
   },
@@ -138,6 +144,14 @@ const Admin = {
       case 'ns-del': el.closest('.ns-row').remove(); break;
       case 'season-view': await App.setSeason(el.dataset.id); location.hash = '#/primera'; break;
       case 'season-del': this.deleteSeason(el.dataset.id); break;
+      case 'cup-create': this.createCup(); break;
+      case 'round-add': this.addRound(); break;
+      case 'round-del': this.deleteRound(el.dataset.r); break;
+      case 'cm-add': this.addCupMatch(el.dataset.r); break;
+      case 'cm-edit': this.openMatch(el.dataset.id, el.dataset.r); break;
+      case 'fdiv': this.fDiv = +el.dataset.v; App.render(); break;
+      case 'fines-save': this.saveFineAmounts(); break;
+      case 'fines-xlsx': this.exportFines(); break;
       case 'gen-open': this.openGenerator(); break;
       case 'gen-run': this.runGenerator(); break;
       default: break;
@@ -177,11 +191,14 @@ const Admin = {
       <div style="padding:8px 0">${rows || '<div class="empty">No hay partidos en esta jornada.</div>'}</div>`;
   },
 
-  openMatch(id) {
-    const src = id && L.d.matches.find(m => m.id === id);
+  // roundId: si se indica, el partido es de la copa (ronda roundId).
+  openMatch(id, roundId = null) {
+    const round = roundId && L.d.cup ? L.d.cup.rounds.find(r => r.id === roundId) : null;
+    const src = round ? round.matches.find(m => m.id === id) : id && L.d.matches.find(m => m.id === id);
     const div = src ? src.div : this.div;
     this.ed = {
       isNew: !src,
+      roundId: round ? round.id : null,
       m: src ? JSON.parse(JSON.stringify(src)) : {
         id: L.uid('m'), div, j: this.j || 1, date: (L.jMatches(div, this.j)[0] || {}).date || D.today(), time: '10:00',
         home: '', away: '', status: 'pending', ev: { h: {}, a: {}, hx: 0, ax: 0 }
@@ -189,12 +206,23 @@ const Admin = {
       newPlayers: []
     };
     const m = this.ed.m;
-    const teamOpts = (sel) => `<option value="">— Elegir equipo —</option>` + L.teams(m.div).map(t => `<option value="${t.id}" ${t.id === sel ? 'selected' : ''}>${esc(t.name)}</option>`).join('');
-    const d = Dlg.open(`${Dlg.head(src ? 'Editar partido' : 'Nuevo partido', `<span class="div-badge sm d${m.div}" id="edBadge">${DIV_TAG[m.div]}</span>`)}
+    const isCup = !!round;
+    // En copa: todos los equipos de la temporada, agrupados por división; ★ = ganador de la ronda anterior.
+    const prevWinners = new Set();
+    if (isCup) {
+      const i = L.d.cup.rounds.indexOf(round);
+      if (i > 0) L.d.cup.rounds[i - 1].matches.forEach(x => { const w = L.cupWinner(x); if (w) prevWinners.add(w); });
+    }
+    const opt = (t, sel) => `<option value="${t.id}" ${t.id === sel ? 'selected' : ''}>${prevWinners.has(t.id) ? '★ ' : ''}${esc(t.name)}</option>`;
+    const teamOpts = (sel) => `<option value="">— Elegir equipo —</option>` + (isCup
+      ? [1, 2].map(dv => `<optgroup label="${DIV_NAME[dv]}">${L.teams(dv).map(t => opt(t, sel)).join('')}</optgroup>`).join('')
+      : L.teams(m.div).map(t => opt(t, sel)).join(''));
+    const badge = isCup ? '<span class="div-badge sm dc"><span class="ms fill">emoji_events</span></span>' : `<span class="div-badge sm d${m.div}" id="edBadge">${DIV_TAG[m.div]}</span>`;
+    const d = Dlg.open(`${Dlg.head(isCup ? `Copa · ${esc(round.name)}` : src ? 'Editar partido' : 'Nuevo partido', badge)}
       <div class="dlg-body">
         <div class="form-grid" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));margin-bottom:16px">
-          <label class="field"><span>División</span><select id="edDiv"><option value="1" ${m.div === 1 ? 'selected' : ''}>1ª División</option><option value="2" ${m.div === 2 ? 'selected' : ''}>2ª División</option></select></label>
-          <label class="field"><span>Jornada</span><input id="edJ" type="number" min="1" max="60" value="${m.j}"></label>
+          ${isCup ? '' : `<label class="field"><span>División</span><select id="edDiv"><option value="1" ${m.div === 1 ? 'selected' : ''}>1ª División</option><option value="2" ${m.div === 2 ? 'selected' : ''}>2ª División</option></select></label>
+          <label class="field"><span>Jornada</span><input id="edJ" type="number" min="1" max="60" value="${m.j}"></label>`}
           <label class="field"><span>Fecha</span><input id="edDate" type="date" value="${m.date}"></label>
           <label class="field"><span>Hora</span><input id="edTime" type="time" value="${m.time}"></label>
           <label class="field"><span>Estado</span><select id="edStatus">
@@ -206,6 +234,10 @@ const Admin = {
           <label class="field"><span>Equipo local</span><select id="edHome">${teamOpts(m.home)}</select></label>
           <label class="field"><span>Equipo visitante</span><select id="edAway">${teamOpts(m.away)}</select></label>
         </div>
+        ${isCup ? `<div class="form-grid" style="margin-bottom:16px">
+          <label class="field"><span>Penaltis local (solo si hay empate)</span><input id="edPh" type="number" min="0" max="99" value="${m.pen ? m.pen.h : ''}" inputmode="numeric"></label>
+          <label class="field"><span>Penaltis visitante (solo si hay empate)</span><input id="edPa" type="number" min="0" max="99" value="${m.pen ? m.pen.a : ''}" inputmode="numeric"></label>
+        </div>${prevWinners.size ? '<p class="muted" style="margin:-6px 0 14px;font-size:12.5px">★ Equipo clasificado en la ronda anterior</p>' : ''}` : ''}
         <div id="edScore"></div>
         <div id="edCols" class="ed-cols" style="margin-top:16px"></div>
       </div>
@@ -218,13 +250,15 @@ const Admin = {
     d.dataset.modal = '1';
     d.addEventListener('close', () => { delete d.dataset.modal; }, { once: true });
 
-    $('#edDiv').addEventListener('change', e => {
-      m.div = +e.target.value; m.home = ''; m.away = ''; m.ev = { h: {}, a: {}, hx: 0, ax: 0 };
-      $('#edHome').innerHTML = teamOpts(''); $('#edAway').innerHTML = teamOpts('');
-      $('#edBadge').className = `div-badge sm d${m.div}`; $('#edBadge').textContent = DIV_TAG[m.div];
-      this.renderEd();
-    });
-    $('#edJ').addEventListener('change', e => { m.j = Math.max(1, +e.target.value || 1); });
+    if (!isCup) {
+      $('#edDiv').addEventListener('change', e => {
+        m.div = +e.target.value; m.home = ''; m.away = ''; m.ev = { h: {}, a: {}, hx: 0, ax: 0 };
+        $('#edHome').innerHTML = teamOpts(''); $('#edAway').innerHTML = teamOpts('');
+        $('#edBadge').className = `div-badge sm d${m.div}`; $('#edBadge').textContent = DIV_TAG[m.div];
+        this.renderEd();
+      });
+      $('#edJ').addEventListener('change', e => { m.j = Math.max(1, +e.target.value || 1); });
+    }
     $('#edDate').addEventListener('change', e => { m.date = e.target.value; });
     $('#edTime').addEventListener('change', e => { m.time = e.target.value; });
     $('#edStatus').addEventListener('change', e => { m.status = e.target.value; this.renderEd(); });
@@ -310,7 +344,8 @@ const Admin = {
   },
 
   async saveMatch() {
-    const { m, isNew, newPlayers } = this.ed;
+    const { m, isNew, newPlayers, roundId } = this.ed;
+    if (roundId) return this.saveCupMatch();
     if (!m.home || !m.away) return snack('Elige los dos equipos.', 'error');
     if (m.home === m.away) return snack('Un equipo no puede jugar contra sí mismo.', 'error');
     if (!m.date || !m.time) return snack('Indica fecha y hora.', 'error');
@@ -324,9 +359,103 @@ const Admin = {
   },
 
   async deleteMatch() {
-    const m = this.ed.m;
-    if (!await Dlg.confirm(`¿Eliminar el partido <b>${esc(L.team(m.home).name)} – ${esc(L.team(m.away).name)}</b>? Se perderán su resultado y estadísticas.`)) return;
-    if (await App.commit(d => { d.matches = d.matches.filter(x => x.id !== m.id); }, 'Partido eliminado')) Dlg.close();
+    const { m, roundId } = this.ed;
+    const label = m.home && m.away ? `<b>${esc(L.team(m.home).name)} – ${esc(L.team(m.away).name)}</b>` : 'este partido';
+    if (!await Dlg.confirm(`¿Eliminar ${label}? Se perderán su resultado y estadísticas.`)) return;
+    const ok = await App.commit(d => {
+      if (roundId) { const r = d.cup.rounds.find(x => x.id === roundId); r.matches = r.matches.filter(x => x.id !== m.id); }
+      else d.matches = d.matches.filter(x => x.id !== m.id);
+    }, 'Partido eliminado');
+    if (ok) Dlg.close();
+  },
+
+  /* ------------------------- Copa ------------------------- */
+  async saveCupMatch() {
+    const { m, newPlayers, roundId } = this.ed;
+    if (m.home && m.home === m.away) return snack('Un equipo no puede jugar contra sí mismo.', 'error');
+    if (m.status === 'played' && (!m.home || !m.away)) return snack('Para anotar el resultado elige los dos equipos.', 'error');
+    const ph = $('#edPh').value.trim(), pa = $('#edPa').value.trim();
+    m.pen = ph !== '' && pa !== '' ? { h: +ph, a: +pa } : null;
+    const sc = this.edScoreVal();
+    if (m.status === 'played' && sc.h === sc.a && (!m.pen || m.pen.h === m.pen.a)) return snack('En copa, si hay empate indica el resultado de los penaltis (con un ganador).', 'error');
+    if (m.status !== 'played' || sc.h !== sc.a) m.pen = null;
+    for (const s of ['h', 'a']) for (const [pid, e] of Object.entries(m.ev[s])) if (!(+e.g || +e.y || +e.r)) delete m.ev[s][pid];
+    m.cup = true;
+    const ok = await App.commit(d => {
+      d.players.push(...newPlayers);
+      const r = d.cup.rounds.find(x => x.id === roundId);
+      const i = r.matches.findIndex(x => x.id === m.id);
+      if (i >= 0) r.matches[i] = m; else r.matches.push(m);
+    }, 'Partido de copa guardado. Cuadro y rankings actualizados.');
+    if (ok) Dlg.close();
+  },
+
+  viewCupAdmin() {
+    const cup = L.d.cup, isAdmin = Api.user.role === 'admin';
+    if (!cup) {
+      return `<div class="card-pad" style="display:grid;gap:16px;justify-items:start">
+        <div class="alert info" style="margin:0"><span class="ms">emoji_events</span><p>La <b>${DIV_NAME.c}</b> se crea una vez por temporada y participan <b>todos los equipos de la temporada actual</b> (${L.teams(1).length} de 1ª y ${L.teams(2).length} de 2ª), con sus ascensos, descensos y equipos nuevos ya aplicados. Se crean las rondas ${CUP_TEMPLATE.map(([n, k]) => `${n} (${k})`).join(', ')}; después eliges los equipos de cada cruce.</p></div>
+        ${isAdmin ? '<button class="btn btn-filled" data-act="cup-create"><span class="ms">emoji_events</span>Crear copa de esta temporada</button>' : '<p class="muted" style="margin:0">Pide a un administrador que cree la copa de esta temporada.</p>'}
+      </div>`;
+    }
+    const st = { played: 'Finalizado', pending: 'Pendiente', postponed: 'Aplazado' };
+    const rounds = cup.rounds.map(r => `<div class="round-card">
+      <div class="round-head">
+        ${isAdmin ? `<input class="input" data-round-name="${r.id}" value="${esc(r.name)}" aria-label="Nombre de la ronda">` : `<b style="flex:1">${esc(r.name)}</b>`}
+        <span class="count">${r.matches.length} partidos</span>
+        ${isAdmin ? `<button class="btn btn-text btn-sm" data-act="cm-add" data-r="${r.id}"><span class="ms">add</span>Partido</button>
+        <button class="icon-btn" data-act="round-del" data-r="${r.id}" title="Eliminar ronda" style="color:var(--loss)"><span class="ms">delete</span></button>` : ''}
+      </div>
+      ${r.matches.map(m => {
+        const h = m.home ? L.team(m.home) : null, a = m.away ? L.team(m.away) : null, sc = L.score(m);
+        return `<div class="list-row clickable" data-act="cm-edit" data-r="${r.id}" data-id="${m.id}">
+          <div style="text-align:center;min-width:58px"><b style="font-family:var(--font-display);font-size:16px">${m.time ? esc(m.time) : '--:--'}</b><div class="muted" style="font-size:11px">${m.date ? `${D.dayShort(m.date)} ${D.dm(m.date)}` : 'Sin fecha'}</div></div>
+          ${h ? shieldImg(h) : '<span class="shield ph" style="width:32px;height:32px"></span>'}
+          <div class="grow"><b>${h ? esc(h.short || h.name) : '<i class="muted">Por definir</i>'} <span class="muted" style="font-weight:400">vs</span> ${a ? esc(a.short || a.name) : '<i class="muted">Por definir</i>'}</b><span class="tag ${m.status}">${st[m.status]}</span></div>
+          ${a ? shieldImg(a) : '<span class="shield ph" style="width:32px;height:32px"></span>'}
+          <b style="font:800 20px var(--font-display);min-width:58px;text-align:center">${sc ? `${sc.h}-${sc.a}${m.pen ? `<small class="muted" style="display:block;font:600 10px var(--font)">${m.pen.h}-${m.pen.a} pen.</small>` : ''}` : '–'}</b>
+          <span class="ms muted">edit</span>
+        </div>`;
+      }).join('') || '<div class="empty" style="padding:16px">Sin partidos. Pulsa “Partido” para añadir uno.</div>'}
+    </div>`).join('');
+    return `<div class="toolbar">
+        <span class="div-badge sm dc"><span class="ms fill">emoji_events</span></span><b style="font:800 20px var(--font-display);text-transform:uppercase">${esc(cup.name)}</b>
+        <span class="spacer"></span>
+        <a class="btn btn-text btn-sm" href="#/copa"><span class="ms">account_tree</span>Ver cuadro</a>
+        ${isAdmin ? '<button class="btn btn-outline btn-sm" data-act="round-add"><span class="ms">add</span>Añadir ronda</button>' : ''}
+      </div>
+      <div class="alert info" style="margin:16px 16px 0"><span class="ms">touch_app</span><p>Pulsa un partido para elegir sus equipos, fecha y hora, y anotar el resultado con goleadores, amonestaciones y expulsiones. Si hay empate, indica los penaltis. En cada ronda, ★ marca los equipos clasificados en la anterior.</p></div>
+      ${rounds}`;
+  },
+
+  async createCup() {
+    if (!await Dlg.confirm(`¿Crear la <b>${DIV_NAME.c}</b> de <b>${esc(L.d.settings.season)}</b> con ${L.d.teams.length} equipos? Se crearán las rondas vacías para elegir los cruces.`, 'Crear copa', false)) return;
+    await App.commit(d => {
+      d.cup = { name: DIV_NAME.c, rounds: CUP_TEMPLATE.map(([name, n]) => ({ id: L.uid('r'), name, matches: Array.from({ length: n }, () => L.newCupMatch()) })) };
+    }, 'Copa creada. Ahora elige los equipos de la ronda preliminar.');
+  },
+
+  async addRound() {
+    await App.commit(d => { d.cup.rounds.push({ id: L.uid('r'), name: 'Nueva ronda', matches: [L.newCupMatch()] }); }, 'Ronda añadida');
+  },
+
+  async deleteRound(rid) {
+    const r = L.d.cup.rounds.find(x => x.id === rid);
+    if (!r) return;
+    const played = r.matches.filter(m => L.played(m)).length;
+    if (!await Dlg.confirm(`¿Eliminar la ronda <b>${esc(r.name)}</b> con sus ${r.matches.length} partidos${played ? ` (<b>${played} ya jugados</b>)` : ''}?`)) return;
+    await App.commit(d => { d.cup.rounds = d.cup.rounds.filter(x => x.id !== rid); }, 'Ronda eliminada');
+  },
+
+  async addCupMatch(rid) {
+    await App.commit(d => { d.cup.rounds.find(x => x.id === rid).matches.push(L.newCupMatch()); }, 'Partido añadido');
+  },
+
+  async renameRound(rid, name) {
+    name = name.trim();
+    const r = L.d.cup.rounds.find(x => x.id === rid);
+    if (!r || !name || name === r.name) return;
+    await App.commit(d => { d.cup.rounds.find(x => x.id === rid).name = name; }, 'Ronda renombrada');
   },
 
   /* ------------------------- Equipos ------------------------- */
@@ -420,6 +549,11 @@ const Admin = {
       d.teams = d.teams.filter(x => x.id !== t.id);
       d.matches = d.matches.filter(m => m.home !== t.id && m.away !== t.id);
       d.players = d.players.filter(p => p.teamId !== t.id);
+      // En la copa, el cruce queda "por definir".
+      for (const r of (d.cup ? d.cup.rounds : [])) for (const m of r.matches) {
+        if (m.home === t.id) { m.home = ''; m.ev.h = {}; m.ev.hx = 0; m.status = 'pending'; m.pen = null; }
+        if (m.away === t.id) { m.away = ''; m.ev.a = {}; m.ev.ax = 0; m.status = 'pending'; m.pen = null; }
+      }
     }, 'Equipo eliminado');
     if (ok) { Api.saveShield(t.id, null).catch(() => {}); Dlg.close(); }
   },
@@ -484,6 +618,171 @@ const Admin = {
       else d.players = d.players.filter(x => x.id !== id);
     }, used ? 'Jugador dado de baja' : 'Jugador eliminado')) this.renderRoster();
   },
+
+  /* ------------------------- Sanciones económicas ------------------------- */
+  fDiv: 0,
+  fSeason: '', // '' = temporada actual; id = temporada archivada (solo consulta)
+
+  // Ejecuta fn con los datos de la temporada elegida en Sanciones y después vuelve a la actual.
+  withFineSeason(fn) {
+    const arch = this.fSeason && App._seasonCache.get(this.fSeason);
+    if (!arch) return fn(false);
+    L.load(arch.data, arch.shields);
+    try { return fn(true); } finally { L.load(Api.state.data, Api.state.shields); }
+  },
+
+  async setFineSeason(id) {
+    if (id && !App._seasonCache.has(id)) {
+      try { App._seasonCache.set(id, await Api.getSeason(id)); } catch (e) { snack(e.message, 'error'); id = ''; }
+    }
+    this.fSeason = id;
+    App.render();
+  },
+
+  fineSeasonPicker() {
+    const idx = L.d.archive;
+    if (!idx.length) return '';
+    return `<label class="season-pick" style="margin-left:0"><span class="ms">history</span><select id="fineSeason" aria-label="Temporada">
+      <option value="">${esc(L.d.settings.season)} (actual)</option>
+      ${[...idx].reverse().map(s => `<option value="${esc(s.id)}" ${this.fSeason === s.id ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></label>`;
+  },
+
+  viewFines() {
+    const picker = this.fineSeasonPicker();
+    return this.withFineSeason(archived => this.finesHtml(picker, archived));
+  },
+
+  finesHtml(picker, archived) {
+    const f = L.d.settings.fines, canEdit = Api.user.role === 'admin' && !archived;
+    const rows = L.fines({ div: this.fDiv });
+    const sum = k => rows.reduce((s, r) => s + k(r), 0);
+    const tot = {
+      ly: sum(r => r.liga.y), lr: sum(r => r.liga.r), cy: sum(r => r.copa.y), cr: sum(r => r.copa.r),
+      y: sum(r => r.y), r: sum(r => r.r), ey: sum(r => r.ey), er: sum(r => r.er), total: sum(r => r.total)
+    };
+    const max = Math.max(1, ...rows.map(r => r.total));
+    const seg = (v, label) => `<button data-act="fdiv" data-v="${v}" class="${this.fDiv === v ? 'active' : ''}">${label}</button>`;
+    const season = L.d.settings.season;
+    const divLabel = this.fDiv ? DIV_NAME[this.fDiv] : 'Todas las divisiones';
+    const yc = '<span class="card-ico y"></span>', rc = '<span class="card-ico r"></span>';
+    return `<div class="toolbar">
+        ${picker}
+        <div class="segmented">${seg(0, 'Todas')}${seg(1, '1ª')}${seg(2, '2ª')}</div>
+      </div>
+      ${archived ? `<div class="alert info" style="margin:16px 16px 0"><span class="ms">history</span><p>Consultando <b>${esc(season)}</b>, ya archivada. Solo lectura: las tarjetas e importes se muestran tal como quedaron al cerrar esa temporada.</p></div>` : ''}
+      <div class="card-pad" style="border-bottom:1px solid var(--outline)">
+        <div class="fines-cfg">
+          <label class="field"><span>€ por tarjeta amarilla</span><input id="fineY" type="number" min="0" step="0.5" value="${f.yellow}" ${canEdit ? '' : 'disabled'}></label>
+          <label class="field"><span>€ por expulsión</span><input id="fineR" type="number" min="0" step="0.5" value="${f.red}" ${canEdit ? '' : 'disabled'}></label>
+          ${canEdit ? '<button class="btn btn-tonal" data-act="fines-save" style="height:48px"><span class="ms">save</span>Guardar importes</button>' : ''}
+        </div>
+        <p class="muted" style="margin:10px 0 0;font-size:12.5px">Solo visible en administración. Se acumulan las tarjetas de <b>liga y copa</b> de los partidos finalizados de la temporada. Al iniciar una temporada nueva el recuento empieza de cero; las anteriores se consultan con el selector de temporada.</p>
+      </div>
+      <div class="kpis">
+        <div class="kpi kpi-cards"><b>${tot.ly}${yc}${tot.lr}${rc}</b><span>Liga</span></div>
+        <div class="kpi kpi-cards"><b>${tot.cy}${yc}${tot.cr}${rc}</b><span>Copa</span></div>
+        <div class="kpi"><b>${money(tot.total)}</b><span>Total temporada (${tot.y} amarillas · ${tot.r} expulsiones)</span></div>
+        <div class="kpi"><b>${rows.filter(r => r.total > 0).length}</b><span>Equipos con sanciones</span></div>
+      </div>
+      <div id="shot-fines">
+        <div class="fine-legend"><span><b>${esc(season)} · ${esc(divLabel)}</b></span><span>${yc} ${money(f.yellow)} / amarilla</span><span>${rc} ${money(f.red)} / expulsión</span></div>
+        <div class="table-wrap"><table class="tbl fines-tbl">
+          <thead>
+            <tr><th rowspan="2">#</th><th rowspan="2" class="left">Equipo</th><th rowspan="2">PJ</th>
+              <th colspan="2" class="grp liga">Liga</th><th colspan="2" class="grp copa">Copa</th><th colspan="2" class="grp tot">Total</th>
+              <th rowspan="2">Importe</th><th rowspan="2" class="hide-sm left">Acumulado</th></tr>
+            <tr><th class="sep">${yc}</th><th>${rc}</th><th class="sep">${yc}</th><th>${rc}</th><th class="sep">${yc}</th><th>${rc}</th></tr>
+          </thead>
+          <tbody>${rows.map((r, i) => `<tr class="clickable" data-fine="${r.team.id}">
+            <td class="pos"><span>${i + 1}</span></td>
+            <td class="left"><div class="teamcell">${shieldImg(r.team)}<span>${teamName(r.team)}</span></div></td>
+            <td>${r.pj}</td>
+            <td class="sep">${r.liga.y}</td><td>${r.liga.r}</td>
+            <td class="sep">${r.copa.y}</td><td>${r.copa.r}</td>
+            <td class="sep"><b>${r.y}</b></td><td><b>${r.r}</b></td>
+            <td class="money total">${money(r.total)}</td>
+            <td class="hide-sm left"><div class="fbar"><span class="y" style="width:${(r.ey / max) * 100}%"></span><span class="r" style="left:${(r.ey / max) * 100}%;width:${(r.er / max) * 100}%"></span></div></td>
+          </tr>`).join('')}</tbody>
+          <tfoot><tr><td></td><td class="left">TOTAL</td><td></td>
+            <td class="sep">${tot.ly}</td><td>${tot.lr}</td><td class="sep">${tot.cy}</td><td>${tot.cr}</td><td class="sep">${tot.y}</td><td>${tot.r}</td>
+            <td class="money total">${money(tot.total)}</td><td class="hide-sm"></td></tr></tfoot>
+        </table></div>
+      </div>
+      <div class="card-actions">
+        <span class="muted" style="margin-right:auto;font-size:12px;align-self:center">Pulsa un equipo para ver el detalle por partido</span>
+        ${shotBtn('shot-fines', 'Sanciones económicas', `${season} · ${divLabel}${archived ? '' : ' · ' + D.fmt(D.today(), { day: 'numeric', month: 'long', year: 'numeric' })}`)}
+        <button class="btn btn-filled btn-sm" data-act="fines-xlsx"><span class="ms">table_view</span>Descargar Excel</button>
+      </div>`;
+  },
+
+  fineContext(m) {
+    const hit = m.cup ? L.cupFind(m.id) : null;
+    return hit ? `Copa · ${hit.r.name}` : `Liga ${DIV_TAG[m.div]} · Jornada ${m.j}`;
+  },
+
+  openFineDetail(teamId) {
+    this.withFineSeason(() => {
+      const row = L.fines().find(r => r.team.id === teamId);
+      if (!row) return;
+      const list = [...row.detail].sort((a, b) => (a.m.date || '').localeCompare(b.m.date || ''));
+      const plural = (n, a, b) => `${n} ${n === 1 ? a : b}`;
+      const yc = '<span class="card-ico y"></span>', rc = '<span class="card-ico r"></span>';
+      Dlg.open(`${Dlg.head('Detalle de sanciones', shieldImg(row.team))}
+        <div class="dlg-body" style="padding:0">
+          <div class="list-row" style="background:var(--surface-2)"><div class="grow"><b>${esc(row.team.name)}</b><span>${esc(L.d.settings.season)} · ${plural(row.pj, 'partido', 'partidos')}</span>
+            <span style="display:block">Liga: ${row.liga.y}${yc} ${row.liga.r}${rc} · Copa: ${row.copa.y}${yc} ${row.copa.r}${rc} · Total: ${plural(row.y, 'amarilla', 'amarillas')}, ${plural(row.r, 'expulsión', 'expulsiones')}</span></div>
+            <b class="money" style="font:800 24px var(--font-display);color:var(--primary)">${money(row.total)}</b></div>
+          ${list.map(x => `<div class="list-row">
+            <div style="min-width:78px;text-align:center"><b style="font-size:13px">${x.m.date ? D.dm(x.m.date) : '—'}</b><div class="muted" style="font-size:11px">${esc(this.fineContext(x.m))}</div></div>
+            <div class="grow"><b>${x.comp === 'copa' ? '<span class="ms fill" style="font-size:15px;color:var(--cup);vertical-align:-2px">emoji_events</span> ' : ''}vs ${esc(L.team(x.rival).name)}</b><span>${x.list.map(p => `${esc(p.p.name)}${p.y ? ` ${yc}${p.y > 1 ? '×' + p.y : ''}` : ''}${p.r ? ` ${rc}${p.r > 1 ? '×' + p.r : ''}` : ''}`).join(' · ')}</span></div>
+            <b class="money">${money(x.amount)}</b>
+          </div>`).join('') || '<div class="empty">Sin sanciones registradas.</div>'}
+        </div>
+        <div class="dlg-foot"><button class="btn btn-filled" data-act="close">Cerrar</button></div>`, 'narrow');
+    });
+  },
+
+  async saveFineAmounts() {
+    if (this.fSeason) return snack('Las temporadas archivadas no se pueden modificar.', 'error');
+    const y = Math.max(0, +$('#fineY').value || 0), r = Math.max(0, +$('#fineR').value || 0);
+    await App.commit(d => { d.settings.fines = { yellow: y, red: r }; }, 'Importes actualizados');
+  },
+
+  async exportFines() {
+    try {
+      if (!window.XLSX) {
+        await new Promise((res, rej) => {
+          const s = document.createElement('script');
+          s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+          s.onload = res; s.onerror = () => rej(new Error('No se pudo cargar el módulo de Excel. Revisa la conexión.'));
+          document.head.append(s);
+        });
+      }
+      this.withFineSeason(() => {
+        const f = L.d.settings.fines;
+        const rows = L.fines({ div: this.fDiv });
+        const resumen = [['Equipo', 'División', 'Partidos jugados', 'Amarillas liga', 'Expulsiones liga', 'Amarillas copa', 'Expulsiones copa',
+          'Amarillas total', 'Expulsiones total', `Importe amarillas (${f.yellow} €)`, `Importe expulsiones (${f.red} €)`, 'Total (€)']];
+        rows.forEach(r => resumen.push([r.team.name, DIV_NAME[r.team.div], r.pj, r.liga.y, r.liga.r, r.copa.y, r.copa.r, r.y, r.r, r.ey, r.er, r.total]));
+        const t = rows.reduce((s, r) => [r.liga.y, r.liga.r, r.copa.y, r.copa.r, r.y, r.r, r.ey, r.er, r.total].map((v, i) => s[i] + v), [0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        resumen.push(['TOTAL', '', '', ...t]);
+        const detalle = [['Fecha', 'Competición', 'Equipo', 'Rival', 'Jugador', 'Amarillas', 'Expulsiones', 'Importe (€)']];
+        rows.forEach(r => [...r.detail].sort((a, b) => (a.m.date || '').localeCompare(b.m.date || '')).forEach(x => x.list.forEach(p =>
+          detalle.push([x.m.date ? D.fmt(x.m.date, { day: '2-digit', month: '2-digit', year: 'numeric' }) : '', this.fineContext(x.m), r.team.name, L.team(x.rival).name, p.p.name, p.y, p.r, p.y * f.yellow + p.r * f.red]))));
+        const wb = XLSX.utils.book_new();
+        const ws1 = XLSX.utils.aoa_to_sheet(resumen);
+        ws1['!cols'] = [{ wch: 32 }, { wch: 18 }, { wch: 10 }, { wch: 13 }, { wch: 15 }, { wch: 13 }, { wch: 15 }, { wch: 14 }, { wch: 16 }, { wch: 22 }, { wch: 24 }, { wch: 12 }];
+        const ws2 = XLSX.utils.aoa_to_sheet(detalle);
+        ws2['!cols'] = [{ wch: 12 }, { wch: 28 }, { wch: 32 }, { wch: 32 }, { wch: 28 }, { wch: 10 }, { wch: 12 }, { wch: 12 }];
+        XLSX.utils.book_append_sheet(wb, ws1, 'Resumen por equipo');
+        XLSX.utils.book_append_sheet(wb, ws2, 'Detalle por partido');
+        const season = (L.d.settings.season || 'temporada').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/gi, '-').toLowerCase();
+        XLSX.writeFile(wb, `sanciones-${season}-${D.today()}.xlsx`);
+      });
+      snack('Excel descargado', 'check_circle');
+    } catch (e) { snack(e.message || 'No se pudo generar el Excel.', 'error'); }
+  },
+
 
   /* ------------------------- Temporadas ------------------------- */
   viewSeasons() {
@@ -578,6 +877,7 @@ const Admin = {
       const ids = new Set(d.teams.map(t => t.id));
       d.players = keep ? d.players.filter(p => ids.has(p.teamId) && !p.deleted) : [];
       d.matches = [];
+      d.cup = null; // la copa anterior queda en el archivo; la nueva se crea desde Admin › Copa
     }, `${name} creada. Ahora genera el calendario de cada división.`);
     if (ok) {
       App._seasonCache.delete(id);
@@ -822,6 +1122,9 @@ const Admin = {
     } catch (e) { snack(e.message, 'error'); }
   }
 };
+
+const _eur = new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR', minimumFractionDigits: 0, maximumFractionDigits: 2 });
+const money = n => _eur.format(n || 0);
 
 // Reduce el escudo subido para que la web cargue rápido.
 function resizeImage(file, max) {

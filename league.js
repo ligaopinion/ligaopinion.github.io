@@ -26,8 +26,10 @@ const D = {
   }
 };
 
-const DIV_NAME = { 1: 'Primera División', 2: 'Segunda División' };
-const DIV_TAG = { 1: '1ª', 2: '2ª' };
+const DIV_NAME = { 1: 'Primera División', 2: 'Segunda División', c: 'Copa Opinión Success' };
+const DIV_TAG = { 1: '1ª', 2: '2ª', c: 'C' };
+// Rondas con las que se crea la copa de cada temporada (se pueden renombrar, añadir o quitar).
+const CUP_TEMPLATE = [['Ronda preliminar', 4], ['Octavos de final', 8], ['Cuartos de final', 4], ['Semifinales', 2], ['Final', 1]];
 const DEFAULT_LEAGUE = 'Liga Success Opinión Futsal Sevilla';
 
 const L = {
@@ -48,19 +50,36 @@ const L = {
     d.settings = Object.assign({ leagueName: '', season: '', description: '', email: '', phone: '', location: '', socials: [] }, d.settings || {});
     if (!d.settings.leagueName) d.settings.leagueName = DEFAULT_LEAGUE;
     if (!Array.isArray(d.settings.socials)) d.settings.socials = [];
+    // Importe de las sanciones económicas (€ por tarjeta).
+    d.settings.fines = Object.assign({ yellow: 2, red: 3 }, d.settings.fines || {});
     d.teams = Array.isArray(d.teams) ? d.teams : [];
     d.players = Array.isArray(d.players) ? d.players : [];
     d.matches = Array.isArray(d.matches) ? d.matches : [];
     // Índice de temporadas archivadas: [{ id, name, at }]
     d.archive = Array.isArray(d.archive) ? d.archive : [];
-    for (const m of d.matches) {
-      m.ev = m.ev || {};
-      for (const k of ['h', 'a']) if (!m.ev[k] || Array.isArray(m.ev[k])) m.ev[k] = {};
-      m.ev.hx = +m.ev.hx || 0;
-      m.ev.ax = +m.ev.ax || 0;
-      m.status = m.status || 'pending';
-    }
+    d.matches.forEach(L.normMatch);
+    // Copa de la temporada: { name, rounds: [{ id, name, matches: [...] }] } o null si aún no se ha creado.
+    if (d.cup && typeof d.cup === 'object') {
+      d.cup.name = d.cup.name || DIV_NAME.c;
+      d.cup.rounds = Array.isArray(d.cup.rounds) ? d.cup.rounds : [];
+      for (const r of d.cup.rounds) {
+        r.matches = Array.isArray(r.matches) ? r.matches : [];
+        r.matches.forEach(m => { L.normMatch(m); m.cup = true; m.pen = m.pen && (m.pen.h !== '' && m.pen.a !== '') ? { h: +m.pen.h || 0, a: +m.pen.a || 0 } : null; });
+      }
+    } else d.cup = null;
     return d;
+  },
+
+  normMatch(m) {
+    m.ev = m.ev || {};
+    for (const k of ['h', 'a']) if (!m.ev[k] || Array.isArray(m.ev[k])) m.ev[k] = {};
+    m.ev.hx = +m.ev.hx || 0;
+    m.ev.ax = +m.ev.ax || 0;
+    m.status = m.status || 'pending';
+  },
+
+  newCupMatch() {
+    return { id: L.uid('c'), cup: true, date: '', time: '', home: '', away: '', status: 'pending', ev: { h: {}, a: {}, hx: 0, ax: 0 }, pen: null };
   },
 
   uid(prefix) { return prefix + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); },
@@ -121,9 +140,10 @@ const L = {
   },
 
   // Suma de estadísticas individuales (goles/tarjetas) en partidos jugados.
-  playerTotals(div) {
+  playerTotals(div) { return this.totalsOf(this.matches(div)); },
+  totalsOf(matches) {
     const tot = new Map();
-    for (const m of this.matches(div)) {
+    for (const m of matches) {
       if (!this.played(m)) continue;
       for (const [side, teamId] of [['h', m.home], ['a', m.away]]) {
         for (const [pid, st] of Object.entries(m.ev[side] || {})) {
@@ -167,6 +187,67 @@ const L = {
     return { from, to: D.add(from, 1) };
   },
   matchesBetween(div, from, to) { return this.matches(div).filter(m => m.date >= from && m.date <= to); },
+
+  /* ---------------- Copa ---------------- */
+  cupMatches() { return this.d.cup ? this.d.cup.rounds.flatMap(r => r.matches) : []; },
+  cupFind(id) {
+    for (const r of (this.d.cup ? this.d.cup.rounds : [])) {
+      const m = r.matches.find(x => x.id === id);
+      if (m) return { m, r };
+    }
+    return null;
+  },
+  // Equipo que pasa de ronda: por goles o, si hay empate, por penaltis.
+  cupWinner(m) {
+    const s = this.score(m);
+    if (!s || !m.home || !m.away) return null;
+    if (s.h !== s.a) return s.h > s.a ? m.home : m.away;
+    if (m.pen && m.pen.h !== m.pen.a) return m.pen.h > m.pen.a ? m.home : m.away;
+    return null;
+  },
+  cupScorers(n = 5) {
+    return this.totalsOf(this.cupMatches()).filter(t => t.g > 0)
+      .sort((a, b) => b.g - a.g || a.player.name.localeCompare(b.player.name, 'es')).slice(0, n);
+  },
+  cupConceded(n = 5) {
+    const rows = new Map();
+    for (const m of this.cupMatches()) {
+      const s = this.score(m);
+      if (!s || !m.home || !m.away) continue;
+      for (const [id, gc] of [[m.home, s.a], [m.away, s.h]]) {
+        const r = rows.get(id) || { team: this.team(id), pj: 0, gc: 0 };
+        r.pj++; r.gc += gc;
+        rows.set(id, r);
+      }
+    }
+    return [...rows.values()].sort((a, b) => a.gc - b.gc || b.pj - a.pj || a.team.name.localeCompare(b.team.name, 'es')).slice(0, n);
+  },
+
+  /* ---------------- Sanciones económicas ---------------- */
+  // Tarjetas de la temporada por equipo, separadas por competición (liga / copa) y acumuladas.
+  // Cada temporada tiene sus propios datos: al iniciar una nueva, el recuento empieza de cero.
+  // div: 0 (todas) | 1 | 2
+  fines({ div = 0 } = {}) {
+    const f = this.d.settings.fines;
+    const ms = [...this.matches(), ...this.cupMatches()].filter(m => this.played(m));
+    const blank = () => ({ pj: 0, y: 0, r: 0 });
+    const rows = new Map(this.teams(div || undefined).map(t => [t.id, { team: t, liga: blank(), copa: blank(), detail: [] }]));
+    for (const m of ms) {
+      const comp = m.cup ? 'copa' : 'liga';
+      for (const [side, teamId, rival] of [['h', m.home, m.away], ['a', m.away, m.home]]) {
+        const row = rows.get(teamId);
+        if (!row) continue;
+        const list = Object.entries(m.ev[side] || {}).map(([pid, st]) => ({ p: this.player(pid), y: +st.y || 0, r: +st.r || 0 })).filter(x => x.p && (x.y || x.r));
+        const y = list.reduce((s, x) => s + x.y, 0), r = list.reduce((s, x) => s + x.r, 0);
+        row[comp].pj++; row[comp].y += y; row[comp].r += r;
+        if (y || r) row.detail.push({ m, comp, rival, y, r, list, amount: y * f.yellow + r * f.red });
+      }
+    }
+    return [...rows.values()].map(r => {
+      const y = r.liga.y + r.copa.y, rd = r.liga.r + r.copa.r;
+      return { ...r, pj: r.liga.pj + r.copa.pj, y, r: rd, ey: y * f.yellow, er: rd * f.red, total: y * f.yellow + rd * f.red };
+    }).sort((a, b) => b.total - a.total || a.team.name.localeCompare(b.team.name, 'es'));
+  },
 
   // Liga todos contra todos (método del círculo). Devuelve jornadas de [local, visitante].
   roundRobin(ids, twoLegs = true) {

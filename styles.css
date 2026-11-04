@@ -21,6 +21,8 @@
   --div2-soft: #fde3dd;
   --div1-dark: #077a8a;
   --div2-dark: #a93b2b;
+  --cup: #d39b00;
+  --cup-dark: #8f6a00;
 
   --bg: #f2f6f8;
   --surface: #ffffff;
@@ -585,3 +587,76 @@ footer.site img { width: 34px; border-radius: 50%; vertical-align: middle; margi
   .stepper button { width: 24px; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+
+/* =====================================================================
+ * v1.1 — Copa, sanciones y novedades
+ * ===================================================================== */
+.div-badge.dc, .rank-head .ico.dc { background: linear-gradient(160deg, #f5c542, var(--cup-dark)); color: #fff; }
+.div-badge.dc .ms { font-size: 26px; }
+.div-badge.sm.dc .ms { font-size: 18px; }
+.match.dc .mdiv { background: linear-gradient(180deg, var(--cup), var(--cup-dark)); }
+.mscore { position: relative; }
+.mscore .pen { position: absolute; left: 0; right: 0; bottom: -15px; font: 700 10px var(--font); color: var(--muted); text-align: center; letter-spacing: 0; }
+
+/* Cuadro de copa */
+.bracket-wrap { overflow-x: auto; padding: 18px 16px 20px; -webkit-overflow-scrolling: touch; }
+.bracket { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(212px, 1fr); gap: 18px; min-width: min-content; }
+.bround { display: flex; flex-direction: column; min-width: 0; }
+.bround h4 {
+  margin: 0 0 12px; padding: 8px 10px; border-radius: 10px; text-align: center;
+  font: 800 15px/1.1 var(--font-display); letter-spacing: .6px; text-transform: uppercase;
+  background: var(--surface-3); color: var(--on-surface);
+}
+.bround:last-child h4 { background: linear-gradient(160deg, #f5c542, var(--cup-dark)); color: #fff; }
+.bms { flex: 1; display: flex; flex-direction: column; justify-content: space-around; gap: 10px; }
+.bmatch { border: 1px solid var(--outline); border-radius: 14px; background: var(--surface); overflow: hidden; box-shadow: var(--elev-1); }
+.bmatch.played { cursor: pointer; }
+.bmatch.played:hover { border-color: var(--cup); }
+.bmeta { display: flex; justify-content: space-between; align-items: center; gap: 6px; padding: 5px 10px; font-size: 11px; font-weight: 600; color: var(--muted); background: var(--surface-2); }
+.bmeta .ms { font-size: 15px; }
+.bteam { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 6px 10px; border-top: 1px solid var(--outline); font-weight: 600; font-size: 13px; }
+.bteam .shield { width: 24px; height: 24px; }
+.bteam .tname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bteam .tname i { color: var(--muted); font-weight: 500; }
+.bteam b { font: 800 19px/1 var(--font-display); white-space: nowrap; }
+.bteam b small { font: 600 11px var(--font); color: var(--muted); margin-left: 3px; }
+.bteam.win { font-weight: 800; background: rgba(211, 155, 0, .12); }
+.bteam.win b { color: var(--cup-dark); }
+.bteam.lose { color: var(--muted); }
+.shield.ph { display: inline-block; width: 24px; height: 24px; border-radius: 50%; background: var(--surface-3); border: 1px dashed var(--outline-strong); }
+.poster.wide .bracket { grid-auto-columns: 212px; }
+.poster .bracket-wrap, .poster-body > .bracket { padding: 16px; }
+
+/* Admin copa */
+.round-card { border: 1px solid var(--outline); border-radius: var(--radius-lg); overflow: hidden; margin: 16px; }
+.round-head { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: var(--surface-2); border-bottom: 1px solid var(--outline); flex-wrap: wrap; }
+.round-head input { flex: 1; min-width: 160px; min-height: 40px; font-weight: 700; }
+.round-head .count { font-size: 12px; color: var(--muted); }
+
+/* Sanciones */
+.fines-cfg { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+.fines-cfg .field { width: 150px; }
+.money { font-variant-numeric: tabular-nums; }
+.tbl .money.total { font: 800 17px var(--font-display); color: var(--primary); }
+.tbl tfoot td { font-weight: 800; background: var(--surface-2); border-top: 2px solid var(--outline-strong); }
+.fbar { position: relative; height: 10px; min-width: 90px; border-radius: 999px; background: var(--surface-3); overflow: hidden; }
+.fbar span { position: absolute; top: 0; bottom: 0; left: 0; }
+.fbar .y { background: #fbc02d; }
+.fbar .r { background: #e53935; }
+.fine-legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12.5px; color: var(--muted); padding: 10px 16px 0; }
+.fine-legend span { display: inline-flex; gap: 6px; align-items: center; }
+
+/* Novedades / versión */
+.ver-link { border: 0; background: none; padding: 0; color: var(--primary); font: inherit; font-weight: 600; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.changes { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; font-size: 14px; }
+.changes li { display: grid; grid-template-columns: 26px 1fr; gap: 8px; align-items: start; }
+.changes .ms { color: var(--primary); font-size: 20px; }
+/* Sanciones: columnas por competición */
+.fines-tbl th.grp { font-size: 11.5px; letter-spacing: .8px; border-bottom: 0; padding-bottom: 4px; }
+.fines-tbl th.grp.liga { color: var(--primary); }
+.fines-tbl th.grp.copa { color: var(--cup-dark); }
+.fines-tbl th.grp.tot { color: var(--on-surface); }
+.fines-tbl .sep { border-left: 1px solid var(--outline); }
+.fines-tbl th.grp { border-left: 1px solid var(--outline); }
+.fines-tbl th[rowspan] { vertical-align: middle; }
+.kpi-cards .card-ico { margin: 0 14px 0 5px; }
