@@ -3,6 +3,7 @@
  * usuarios, ajustes y cuenta.
  * ===================================================================== */
 const ROLE_LABEL = { admin: 'Administrador', gestor: 'Normal (gestor)' };
+const PRIV_ERROR = 'No se puede acceder a las otras sanciones. Un administrador debe publicar en Firebase las reglas actualizadas del archivo firestore.rules.';
 
 const Admin = {
   tab: 'partidos',
@@ -114,13 +115,14 @@ const Admin = {
 
   async handle(act, el) {
     switch (act) {
-      case 'logout': await Api.logout(); this.users = null; snack('Sesión cerrada', 'logout'); App.render(); break;
+      case 'logout': await Api.logout(); location.reload(); break; // recarga para no dejar datos privados en memoria
       case 'atab': this.setTab(el.dataset.tab); break;
       case 'adiv': this.div = +el.dataset.div; this.j = null; App.render(); break;
       case 'aj': if (el.dataset.j !== 'undefined') { this.j = +el.dataset.j; App.render(); } break;
       case 'm-edit': this.openMatch(el.dataset.id); break;
       case 'm-new': this.openMatch(null); break;
       case 'st': this.step(el); break;
+      case 'san': this.stepSan(el); break;
       case 'qadd': this.quickAdd(el.dataset.side); break;
       case 'ed-save': this.saveMatch(); break;
       case 'ed-del': this.deleteMatch(); break;
@@ -208,6 +210,7 @@ const Admin = {
       newPlayers: []
     };
     const m = this.ed.m;
+    L.normMatch(m);
     const isCup = !!round;
     // En copa: todos los equipos de la temporada, agrupados por división; ★ = clasificado de la ronda anterior.
     const prevWinners = new Set();
@@ -247,6 +250,7 @@ const Admin = {
         <div id="edShow"></div>
         <div id="edScore"></div>
         <div id="edCols" class="ed-cols" style="margin-top:16px"></div>
+        <div id="edSan"></div>
       </div>
       <div class="dlg-foot">
         ${src ? '<button class="btn btn-danger" data-act="ed-del"><span class="ms">delete</span>Eliminar</button>' : ''}
@@ -260,7 +264,7 @@ const Admin = {
     if (isCup) $('#edLabel').addEventListener('input', e => { m.label = e.target.value.trim().toUpperCase(); });
     if (!isCup) {
       $('#edDiv').addEventListener('change', e => {
-        m.div = +e.target.value; m.home = ''; m.away = ''; m.ev = { h: {}, a: {}, hx: 0, ax: 0 }; m.noShow = m.replaced = null;
+        m.div = +e.target.value; m.home = ''; m.away = ''; m.ev = { h: {}, a: {}, hx: 0, ax: 0 }; m.noShow = m.replaced = null; m.san = { h: L.blankSan(), a: L.blankSan() };
         $('#edHome').innerHTML = teamOpts(''); $('#edAway').innerHTML = teamOpts('');
         $('#edBadge').className = `div-badge sm d${m.div}`; $('#edBadge').textContent = DIV_TAG[m.div];
         this.renderEd();
@@ -271,19 +275,54 @@ const Admin = {
     $('#edTime').addEventListener('change', e => { m.time = e.target.value; });
     $('#edStatus').addEventListener('change', e => {
       m.status = e.target.value;
-      if (m.status !== 'played') m.noShow = m.replaced = null;
+      if (m.status !== 'played') { this.edSetNoShow(null); m.replaced = null; }
       this.renderEd();
     });
-    $('#edHome').addEventListener('change', e => { m.home = e.target.value; m.ev.h = {}; m.ev.hx = 0; m.noShow = m.replaced = null; this.renderEd(); });
-    $('#edAway').addEventListener('change', e => { m.away = e.target.value; m.ev.a = {}; m.ev.ax = 0; m.noShow = m.replaced = null; this.renderEd(); });
+    $('#edHome').addEventListener('change', e => { m.home = e.target.value; m.ev.h = {}; m.ev.hx = 0; this.edSetNoShow(null); m.replaced = null; m.san.h = L.blankSan(); this.renderEd(); });
+    $('#edAway').addEventListener('change', e => { m.away = e.target.value; m.ev.a = {}; m.ev.ax = 0; this.edSetNoShow(null); m.replaced = null; m.san.a = L.blankSan(); this.renderEd(); });
     $('#edShow').addEventListener('change', e => {
       const [kind, side] = e.target.value.split('-');
-      m.noShow = kind === 'ns' ? side : null;
+      this.edSetNoShow(kind === 'ns' ? side : null);
       m.replaced = kind === 'rp' ? side : null;
       if (kind) { m.status = 'played'; $('#edStatus').value = 'played'; }
       this.renderEd();
     });
     this.renderEd();
+  },
+
+  // Marcar un no presentado anota su incomparecencia; quitarlo la retira.
+  edSetNoShow(side) {
+    const m = this.ed.m;
+    if (m.noShow) m.san[m.noShow].incomp = 0;
+    m.noShow = side;
+    if (side) m.san[side].incomp = Math.max(1, m.san[side].incomp);
+  },
+
+  // Otras sanciones del acta (solo en el panel; no aparecen en la web pública).
+  renderSan() {
+    const m = this.ed.m, box = $('#edSan'), f = L.d.settings.fines;
+    if (!m.home || !m.away || !Api.state.privOk) {
+      box.innerHTML = Api.state.privError ? `<div class="alert warn" style="margin-top:16px"><span class="ms">lock</span><p>${PRIV_ERROR}</p></div>` : '';
+      return;
+    }
+    const col = side => {
+      const t = L.team(side === 'h' ? m.home : m.away);
+      return `<div class="ed-team"><h4>${shieldImg(t)}${esc(t.name)}</h4>${OTHER_SANCTIONS.map(o => {
+        const n = m.san[side][o.k];
+        return `<div class="ed-row"><span class="pname">${o.label} <small>${money(f[o.k])}</small></span>
+          <span class="steppers"><span class="stepper r ${n ? 'on' : ''}">
+            <button type="button" data-act="san" data-side="${side}" data-k="${o.k}" data-d="-1" aria-label="Quitar ${o.label}">−</button><b>${n}</b>
+            <button type="button" data-act="san" data-side="${side}" data-k="${o.k}" data-d="1" aria-label="Añadir ${o.label}">+</button></span></span></div>`;
+      }).join('')}</div>`;
+    };
+    box.innerHTML = `<div class="san-head"><span class="ms">gavel</span><div><b>Otras sanciones</b><p>Solo visible en administración.${m.status === 'played' ? '' : ' Se contabilizan cuando el partido esté Finalizado.'} Los importes se ajustan en Sanciones.</p></div></div>
+      <div class="ed-cols">${col('h')}${col('a')}</div>`;
+  },
+
+  stepSan(el) {
+    const { side, k } = el.dataset, san = this.ed.m.san[side];
+    san[k] = Math.max(0, san[k] + +el.dataset.d);
+    this.renderSan();
   },
 
   // Selector de presentación: ambos equipos, no presentado o equipo sustituido.
@@ -363,6 +402,7 @@ const Admin = {
       </div>`;
     };
     $('#edCols').innerHTML = m.noShow || m.replaced ? '' : col('h') + col('a');
+    this.renderSan();
   },
 
   step(el) {
@@ -695,18 +735,22 @@ const Admin = {
   /* ------------------------- Sanciones económicas ------------------------- */
   fDiv: 0,
   fSeason: '', // '' = temporada actual; id = temporada archivada (solo consulta)
+  finePriv: new Map(), // zona privada de cada temporada archivada
 
   // Ejecuta fn con los datos de la temporada elegida en Sanciones y después vuelve a la actual.
   withFineSeason(fn) {
     const arch = this.fSeason && App._seasonCache.get(this.fSeason);
     if (!arch) return fn(false);
-    L.load(arch.data, arch.shields);
-    try { return fn(true); } finally { L.load(Api.state.data, Api.state.shields); }
+    L.load(arch.data, arch.shields, this.finePriv.get(this.fSeason));
+    try { return fn(true); } finally { L.load(Api.state.data, Api.state.shields, Api.state.priv); }
   },
 
   async setFineSeason(id) {
     if (id && !App._seasonCache.has(id)) {
       try { App._seasonCache.set(id, await Api.getSeason(id)); } catch (e) { snack(e.message, 'error'); id = ''; }
+    }
+    if (id && !this.finePriv.has(id)) {
+      try { this.finePriv.set(id, await Api.getSeasonPrivate(id)); } catch (e) { console.error(e); snack(PRIV_ERROR, 'lock'); }
     }
     this.fSeason = id;
     App.render();
@@ -727,12 +771,14 @@ const Admin = {
 
   finesHtml(picker, archived) {
     const f = L.d.settings.fines, canEdit = Api.user.role === 'admin' && !archived;
+    const canEditOther = canEdit && Api.state.privOk;
     const rows = L.fines({ div: this.fDiv });
     const sum = k => rows.reduce((s, r) => s + k(r), 0);
     const tot = {
       ly: sum(r => r.liga.y), lr: sum(r => r.liga.r), cy: sum(r => r.copa.y), cr: sum(r => r.copa.r),
-      y: sum(r => r.y), r: sum(r => r.r), ey: sum(r => r.ey), er: sum(r => r.er), total: sum(r => r.total)
+      y: sum(r => r.y), r: sum(r => r.r), on: sum(r => r.on), eo: sum(r => r.eo), total: sum(r => r.total)
     };
+    const otherTot = k => sum(r => r.otros[k]);
     const max = Math.max(1, ...rows.map(r => r.total));
     const seg = (v, label) => `<button data-act="fdiv" data-v="${v}" class="${this.fDiv === v ? 'active' : ''}">${label}</button>`;
     const season = L.d.settings.season;
@@ -743,28 +789,33 @@ const Admin = {
         <div class="segmented">${seg(0, 'Todas')}${seg(1, '1ª')}${seg(2, '2ª')}</div>
       </div>
       ${archived ? `<div class="alert info" style="margin:16px 16px 0"><span class="ms">history</span><p>Consultando <b>${esc(season)}</b>, ya archivada. Solo lectura: las tarjetas e importes se muestran tal como quedaron al cerrar esa temporada.</p></div>` : ''}
+      ${Api.state.privError && !archived ? `<div class="alert warn" style="margin:16px 16px 0"><span class="ms">lock</span><p>${PRIV_ERROR}</p></div>` : ''}
       <div class="card-pad" style="border-bottom:1px solid var(--outline)">
         <div class="fines-cfg">
           <label class="field"><span>€ por tarjeta amarilla</span><input id="fineY" type="number" min="0" step="0.5" value="${f.yellow}" ${canEdit ? '' : 'disabled'}></label>
           <label class="field"><span>€ por expulsión</span><input id="fineR" type="number" min="0" step="0.5" value="${f.red}" ${canEdit ? '' : 'disabled'}></label>
+          <label class="field"><span>€ duplicidad de dorsal</span><input id="fineD" type="number" min="0" step="0.5" value="${f.dorsal}" ${canEditOther ? '' : 'disabled'}></label>
+          <label class="field"><span>€ no llevar balón</span><input id="fineB" type="number" min="0" step="0.5" value="${f.balon}" ${canEditOther ? '' : 'disabled'}></label>
+          <label class="field"><span>€ incomparecencia</span><input id="fineI" type="number" min="0" step="0.5" value="${f.incomp}" ${canEditOther ? '' : 'disabled'}></label>
           ${canEdit ? '<button class="btn btn-tonal" data-act="fines-save" style="height:48px"><span class="ms">save</span>Guardar importes</button>' : ''}
         </div>
-        <p class="muted" style="margin:10px 0 0;font-size:12.5px">Solo visible en administración. Se acumulan las tarjetas de <b>liga y copa</b> de los partidos finalizados de la temporada. Al iniciar una temporada nueva el recuento empieza de cero; las anteriores se consultan con el selector de temporada.</p>
+        <p class="muted" style="margin:10px 0 0;font-size:12.5px">Solo visible en administración. Se acumulan las tarjetas y las otras sanciones del acta de <b>liga y copa</b> de los partidos finalizados de la temporada. Al iniciar una temporada nueva el recuento empieza de cero; las anteriores se consultan con el selector de temporada.</p>
       </div>
-      <div class="kpis">
+      <div class="kpis fines-kpis">
         <div class="kpi kpi-cards"><b>${tot.ly}${yc}${tot.lr}${rc}</b><span>Liga</span></div>
         <div class="kpi kpi-cards"><b>${tot.cy}${yc}${tot.cr}${rc}</b><span>Copa</span></div>
+        <div class="kpi"><b>${tot.on}</b><span>Otras sanciones · ${money(tot.eo)}</span></div>
         <div class="kpi"><b>${money(tot.total)}</b><span>Total temporada (${tot.y} amarillas · ${tot.r} expulsiones)</span></div>
-        <div class="kpi"><b>${rows.filter(r => r.total > 0).length}</b><span>Equipos con sanciones</span></div>
+        <div class="kpi"><b>${rows.filter(r => r.y || r.r || r.on).length}</b><span>Equipos con sanciones</span></div>
       </div>
       <div id="shot-fines">
-        <div class="fine-legend"><span><b>${esc(season)} · ${esc(divLabel)}</b></span><span>${yc} ${money(f.yellow)} / amarilla</span><span>${rc} ${money(f.red)} / expulsión</span></div>
+        <div class="fine-legend"><span><b>${esc(season)} · ${esc(divLabel)}</b></span><span>${yc} ${money(f.yellow)} / amarilla</span><span>${rc} ${money(f.red)} / expulsión</span>${OTHER_SANCTIONS.map(o => `<span>${o.label}: ${money(f[o.k])}</span>`).join('')}</div>
         <div class="table-wrap"><table class="tbl fines-tbl">
           <thead>
             <tr><th rowspan="2">#</th><th rowspan="2" class="left">Equipo</th><th rowspan="2">PJ</th>
-              <th colspan="2" class="grp liga">Liga</th><th colspan="2" class="grp copa">Copa</th><th colspan="2" class="grp tot">Total</th>
-              <th rowspan="2">Importe</th><th rowspan="2" class="hide-sm left">Acumulado</th></tr>
-            <tr><th class="sep">${yc}</th><th>${rc}</th><th class="sep">${yc}</th><th>${rc}</th><th class="sep">${yc}</th><th>${rc}</th></tr>
+              <th colspan="2" class="grp liga">Liga</th><th colspan="2" class="grp copa">Copa</th><th colspan="2" class="grp tot">Total</th><th colspan="3" class="grp otros">Otras sanciones</th>
+              <th rowspan="2" class="sep">Importe</th><th rowspan="2" class="hide-sm left fine-bar">Acumulado</th></tr>
+            <tr><th class="sep">${yc}</th><th>${rc}</th><th class="sep">${yc}</th><th>${rc}</th><th class="sep">${yc}</th><th>${rc}</th>${OTHER_SANCTIONS.map((o, i) => `<th class="${i ? '' : 'sep'}" title="${o.label}">${o.short}</th>`).join('')}</tr>
           </thead>
           <tbody>${rows.map((r, i) => `<tr class="clickable" data-fine="${r.team.id}">
             <td class="pos"><span>${i + 1}</span></td>
@@ -773,12 +824,14 @@ const Admin = {
             <td class="sep">${r.liga.y}</td><td>${r.liga.r}</td>
             <td class="sep">${r.copa.y}</td><td>${r.copa.r}</td>
             <td class="sep"><b>${r.y}</b></td><td><b>${r.r}</b></td>
-            <td class="money total">${money(r.total)}</td>
-            <td class="hide-sm left"><div class="fbar"><span class="y" style="width:${(r.ey / max) * 100}%"></span><span class="r" style="left:${(r.ey / max) * 100}%;width:${(r.er / max) * 100}%"></span></div></td>
+            ${OTHER_SANCTIONS.map((o, i) => `<td class="${i ? '' : 'sep'}">${r.otros[o.k]}</td>`).join('')}
+            <td class="sep money total">${money(r.total)}</td>
+            <td class="hide-sm left fine-bar"><div class="fbar"><span class="y" style="width:${(r.ey / max) * 100}%"></span><span class="r" style="left:${(r.ey / max) * 100}%;width:${(r.er / max) * 100}%"></span><span class="o" style="left:${((r.ey + r.er) / max) * 100}%;width:${(r.eo / max) * 100}%"></span></div></td>
           </tr>`).join('')}</tbody>
           <tfoot><tr><td></td><td class="left">TOTAL</td><td></td>
             <td class="sep">${tot.ly}</td><td>${tot.lr}</td><td class="sep">${tot.cy}</td><td>${tot.cr}</td><td class="sep">${tot.y}</td><td>${tot.r}</td>
-            <td class="money total">${money(tot.total)}</td><td class="hide-sm"></td></tr></tfoot>
+            ${OTHER_SANCTIONS.map((o, i) => `<td class="${i ? '' : 'sep'}">${otherTot(o.k)}</td>`).join('')}
+            <td class="sep money total">${money(tot.total)}</td><td class="hide-sm fine-bar"></td></tr></tfoot>
         </table></div>
       </div>
       <div class="card-actions">
@@ -803,11 +856,11 @@ const Admin = {
       Dlg.open(`${Dlg.head('Detalle de sanciones', shieldImg(row.team))}
         <div class="dlg-body" style="padding:0">
           <div class="list-row" style="background:var(--surface-2)"><div class="grow"><b>${esc(row.team.name)}</b><span>${esc(L.d.settings.season)} · ${plural(row.pj, 'partido', 'partidos')}</span>
-            <span style="display:block">Liga: ${row.liga.y}${yc} ${row.liga.r}${rc} · Copa: ${row.copa.y}${yc} ${row.copa.r}${rc} · Total: ${plural(row.y, 'amarilla', 'amarillas')}, ${plural(row.r, 'expulsión', 'expulsiones')}</span></div>
+            <span style="display:block">Liga: ${row.liga.y}${yc} ${row.liga.r}${rc} · Copa: ${row.copa.y}${yc} ${row.copa.r}${rc} · Total: ${plural(row.y, 'amarilla', 'amarillas')}, ${plural(row.r, 'expulsión', 'expulsiones')}, ${plural(row.on, 'otra sanción', 'otras sanciones')}</span></div>
             <b class="money" style="font:800 24px var(--font-display);color:var(--primary)">${money(row.total)}</b></div>
           ${list.map(x => `<div class="list-row">
             <div style="min-width:78px;text-align:center"><b style="font-size:13px">${x.m.date ? D.dm(x.m.date) : '—'}</b><div class="muted" style="font-size:11px">${esc(this.fineContext(x.m))}</div></div>
-            <div class="grow"><b>${x.comp === 'copa' ? '<span class="ms fill" style="font-size:15px;color:var(--cup);vertical-align:-2px">emoji_events</span> ' : ''}vs ${esc(L.team(x.rival).name)}</b><span>${x.list.map(p => `${esc(p.p.name)}${p.y ? ` ${yc}${p.y > 1 ? '×' + p.y : ''}` : ''}${p.r ? ` ${rc}${p.r > 1 ? '×' + p.r : ''}` : ''}`).join(' · ')}</span></div>
+            <div class="grow"><b>${x.comp === 'copa' ? '<span class="ms fill" style="font-size:15px;color:var(--cup);vertical-align:-2px">emoji_events</span> ' : ''}vs ${esc(L.team(x.rival).name)}</b><span>${x.list.map(p => `${esc(p.p.name)}${p.y ? ` ${yc}${p.y > 1 ? '×' + p.y : ''}` : ''}${p.r ? ` ${rc}${p.r > 1 ? '×' + p.r : ''}` : ''}`).concat(x.san.map(s => `${s.label}${s.n > 1 ? ' ×' + s.n : ''}`)).join(' · ')}</span></div>
             <b class="money">${money(x.amount)}</b>
           </div>`).join('') || '<div class="empty">Sin sanciones registradas.</div>'}
         </div>
@@ -817,8 +870,9 @@ const Admin = {
 
   async saveFineAmounts() {
     if (this.fSeason) return snack('Las temporadas archivadas no se pueden modificar.', 'error');
-    const y = Math.max(0, +$('#fineY').value || 0), r = Math.max(0, +$('#fineR').value || 0);
-    await App.commit(d => { d.settings.fines = { yellow: y, red: r }; }, 'Importes actualizados');
+    const num = id => Math.max(0, +$(id).value || 0);
+    const fines = { yellow: num('#fineY'), red: num('#fineR'), dorsal: num('#fineD'), balon: num('#fineB'), incomp: num('#fineI') };
+    await App.commit(d => { d.settings.fines = fines; }, 'Importes actualizados');
   },
 
   async exportFines() {
@@ -835,18 +889,22 @@ const Admin = {
         const f = L.d.settings.fines;
         const rows = L.fines({ div: this.fDiv });
         const resumen = [['Equipo', 'División', 'Partidos jugados', 'Amarillas liga', 'Expulsiones liga', 'Amarillas copa', 'Expulsiones copa',
-          'Amarillas total', 'Expulsiones total', `Importe amarillas (${f.yellow} €)`, `Importe expulsiones (${f.red} €)`, 'Total (€)']];
-        rows.forEach(r => resumen.push([r.team.name, DIV_NAME[r.team.div], r.pj, r.liga.y, r.liga.r, r.copa.y, r.copa.r, r.y, r.r, r.ey, r.er, r.total]));
-        const t = rows.reduce((s, r) => [r.liga.y, r.liga.r, r.copa.y, r.copa.r, r.y, r.r, r.ey, r.er, r.total].map((v, i) => s[i] + v), [0, 0, 0, 0, 0, 0, 0, 0, 0]);
+          'Amarillas total', 'Expulsiones total', ...OTHER_SANCTIONS.map(o => `${o.label} (${f[o.k]} €)`), `Importe amarillas (${f.yellow} €)`, `Importe expulsiones (${f.red} €)`, 'Importe otras sanciones', 'Total (€)']];
+        const nums = r => [r.liga.y, r.liga.r, r.copa.y, r.copa.r, r.y, r.r, ...OTHER_SANCTIONS.map(o => r.otros[o.k]), r.ey, r.er, r.eo, r.total];
+        rows.forEach(r => resumen.push([r.team.name, DIV_NAME[r.team.div], r.pj, ...nums(r)]));
+        const t = rows.reduce((s, r) => nums(r).map((v, i) => s[i] + v), Array(13).fill(0));
         resumen.push(['TOTAL', '', '', ...t]);
-        const detalle = [['Fecha', 'Competición', 'Equipo', 'Rival', 'Jugador', 'Amarillas', 'Expulsiones', 'Importe (€)']];
-        rows.forEach(r => [...r.detail].sort((a, b) => (a.m.date || '').localeCompare(b.m.date || '')).forEach(x => x.list.forEach(p =>
-          detalle.push([x.m.date ? D.fmt(x.m.date, { day: '2-digit', month: '2-digit', year: 'numeric' }) : '', this.fineContext(x.m), r.team.name, L.team(x.rival).name, p.p.name, p.y, p.r, p.y * f.yellow + p.r * f.red]))));
+        const detalle = [['Fecha', 'Competición', 'Equipo', 'Rival', 'Jugador', 'Amarillas', 'Expulsiones', 'Otra sanción', 'Importe (€)']];
+        rows.forEach(r => [...r.detail].sort((a, b) => (a.m.date || '').localeCompare(b.m.date || '')).forEach(x => {
+          const base = [x.m.date ? D.fmt(x.m.date, { day: '2-digit', month: '2-digit', year: 'numeric' }) : '', this.fineContext(x.m), r.team.name, L.team(x.rival).name];
+          x.list.forEach(p => detalle.push([...base, p.p.name, p.y, p.r, '', p.y * f.yellow + p.r * f.red]));
+          x.san.forEach(s => detalle.push([...base, '', 0, 0, s.n > 1 ? `${s.label} ×${s.n}` : s.label, s.amount]));
+        }));
         const wb = XLSX.utils.book_new();
         const ws1 = XLSX.utils.aoa_to_sheet(resumen);
-        ws1['!cols'] = [{ wch: 32 }, { wch: 18 }, { wch: 10 }, { wch: 13 }, { wch: 15 }, { wch: 13 }, { wch: 15 }, { wch: 14 }, { wch: 16 }, { wch: 22 }, { wch: 24 }, { wch: 12 }];
+        ws1['!cols'] = [{ wch: 32 }, { wch: 18 }, { wch: 10 }, { wch: 13 }, { wch: 15 }, { wch: 13 }, { wch: 15 }, { wch: 14 }, { wch: 16 }, { wch: 22 }, { wch: 20 }, { wch: 20 }, { wch: 22 }, { wch: 24 }, { wch: 22 }, { wch: 12 }];
         const ws2 = XLSX.utils.aoa_to_sheet(detalle);
-        ws2['!cols'] = [{ wch: 12 }, { wch: 28 }, { wch: 32 }, { wch: 32 }, { wch: 28 }, { wch: 10 }, { wch: 12 }, { wch: 12 }];
+        ws2['!cols'] = [{ wch: 12 }, { wch: 28 }, { wch: 32 }, { wch: 32 }, { wch: 28 }, { wch: 10 }, { wch: 12 }, { wch: 24 }, { wch: 12 }];
         XLSX.utils.book_append_sheet(wb, ws1, 'Resumen por equipo');
         XLSX.utils.book_append_sheet(wb, ws2, 'Detalle por partido');
         const season = (L.d.settings.season || 'temporada').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/gi, '-').toLowerCase();
@@ -934,10 +992,11 @@ const Admin = {
     while (L.d.archive.some(a => a.id === id)) id = `${base}-${k++}`;
     const snapshot = JSON.parse(JSON.stringify(L.d));
     delete snapshot.archive;
+    const priv = L.extractPrivate(snapshot);
     const shields = {};
     for (const t of L.d.teams) if (L.shields[t.id]) shields[t.id] = L.shields[t.id];
     try {
-      await Api.archiveSeason(id, { name: cur, data: snapshot, shields });
+      await Api.archiveSeason(id, { name: cur, data: snapshot, shields, priv: Api.state.privOk ? priv : null });
     } catch (e) {
       return snack('No se pudo archivar la temporada: ' + e.message, 'error');
     }

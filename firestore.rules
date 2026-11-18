@@ -22,6 +22,11 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // Otras sanciones del acta e importes: solo las cuentas del panel pueden leerlas o cambiarlas.
+    match /private/{doc} {
+      allow read, write: if isMember();
+    }
+
     match /meta/init {
       allow read: if true;
       allow create: if bootstrapping();

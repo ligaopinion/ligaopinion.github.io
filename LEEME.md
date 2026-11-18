@@ -74,6 +74,7 @@ window.FIREBASE_CONFIG = {
   * Cuenta las amarillas y las expulsiones de los partidos finalizados y calcula el importe de cada equipo. Los importes los cambia un administrador; por defecto son 2 € por amarilla y 3 € por expulsión.
   * Cada equipo muestra por separado las tarjetas de **liga** y de **copa**, y el total acumulado de la temporada.
   * Al iniciar una temporada nueva, el recuento empieza de cero. Las temporadas anteriores se consultan con el selector de temporada de la propia pestaña.
+  * **Otras sanciones**: en el acta de cada partido se anotan por equipo la duplicidad de dorsal, no llevar balón y la incomparecencia. Su importe (0 € por defecto) se ajusta en esta pestaña y se suma al total del equipo. Se guardan en una zona privada de la base de datos, a la que solo acceden las cuentas del panel.
   * Se puede filtrar por división, ver el detalle por partido, capturar la tabla y descargarla en Excel.
 * **Copia de seguridad**: en *Admin › Ajustes* puedes descargar todos los datos y restaurarlos.
 * **Versiones**: las novedades de cada versión están en `CAMBIOS.md` y dentro de la web, al pulsar la versión en el pie de página.

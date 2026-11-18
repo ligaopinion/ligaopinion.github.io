@@ -51,6 +51,12 @@ const CUP_PRESETS = {
   ]
 };
 const DEFAULT_LEAGUE = 'Liga Success Opinión Futsal Sevilla';
+// Sanciones del acta distintas de las tarjetas (solo se ven en administración).
+const OTHER_SANCTIONS = [
+  { k: 'dorsal', label: 'Duplicidad de dorsal', short: 'Dorsal' },
+  { k: 'balon', label: 'No llevar balón', short: 'Balón' },
+  { k: 'incomp', label: 'Incomparecencia', short: 'Incomp.' }
+];
 
 const L = {
   d: null,
@@ -58,11 +64,39 @@ const L = {
   _teams: new Map(),
   _players: new Map(),
 
-  load(data, shields) {
+  // priv: otras sanciones e importes de la zona privada (solo con sesión iniciada en el panel).
+  load(data, shields, priv) {
     this.d = L.normalize(data);
     this.shields = shields || {};
     this._teams = new Map(this.d.teams.map(t => [t.id, t]));
     this._players = new Map(this.d.players.map(p => [p.id, p]));
+    if (priv) L.applyPrivate(this.d, priv);
+  },
+
+  allMatches(d) { return [...d.matches, ...(d.cup ? d.cup.rounds.flatMap(r => r.matches) : [])]; },
+
+  applyPrivate(d, priv) {
+    Object.assign(d.settings.fines, priv.fines);
+    for (const m of L.allMatches(d)) {
+      const e = priv.matches[m.id];
+      if (e) m.san = { h: L.blankSan(e.h), a: L.blankSan(e.a) };
+    }
+  },
+
+  // Saca de los datos públicos las otras sanciones y sus importes, y los devuelve aparte.
+  extractPrivate(d) {
+    const priv = { fines: {}, matches: {} };
+    for (const o of OTHER_SANCTIONS) {
+      priv.fines[o.k] = +d.settings.fines[o.k] || 0;
+      delete d.settings.fines[o.k];
+    }
+    for (const m of L.allMatches(d)) {
+      const san = m.san || {};
+      const used = ['h', 'a'].some(s => Object.values(san[s] || {}).some(Boolean));
+      if (used || m.noShow) priv.matches[m.id] = { h: L.blankSan(san.h), a: L.blankSan(san.a) };
+      delete m.san;
+    }
+    return priv;
   },
 
   normalize(data) {
@@ -71,7 +105,7 @@ const L = {
     if (!d.settings.leagueName) d.settings.leagueName = DEFAULT_LEAGUE;
     if (!Array.isArray(d.settings.socials)) d.settings.socials = [];
     // Importe de las sanciones económicas (€ por tarjeta).
-    d.settings.fines = Object.assign({ yellow: 2, red: 3 }, d.settings.fines || {});
+    d.settings.fines = Object.assign({ yellow: 2, red: 3, dorsal: 0, balon: 0, incomp: 0 }, d.settings.fines || {});
     d.teams = Array.isArray(d.teams) ? d.teams : [];
     d.players = Array.isArray(d.players) ? d.players : [];
     d.matches = Array.isArray(d.matches) ? d.matches : [];
@@ -99,6 +133,15 @@ const L = {
     // Lado ('h' | 'a') que no se presentó, o que no computa por ser un equipo que sustituyó a otro.
     m.noShow = m.noShow === 'h' || m.noShow === 'a' ? m.noShow : null;
     m.replaced = m.replaced === 'h' || m.replaced === 'a' ? m.replaced : null;
+    // Otras sanciones por equipo. Los no presentados anteriores a este apartado cuentan como incomparecencia.
+    const isOld = !m.san;
+    const san = m.san || {};
+    m.san = { h: L.blankSan(san.h), a: L.blankSan(san.a) };
+    if (isOld && m.noShow) m.san[m.noShow].incomp = 1;
+  },
+
+  blankSan(v = {}) {
+    return Object.fromEntries(OTHER_SANCTIONS.map(o => [o.k, Math.max(0, +v[o.k] || 0)]));
   },
 
   newCupMatch(label = '') {
@@ -337,7 +380,7 @@ const L = {
     const f = this.d.settings.fines;
     const ms = [...this.matches(), ...this.cupMatches()].filter(m => this.played(m));
     const blank = () => ({ pj: 0, y: 0, r: 0 });
-    const rows = new Map(this.teams(div || undefined).map(t => [t.id, { team: t, liga: blank(), copa: blank(), detail: [] }]));
+    const rows = new Map(this.teams(div || undefined).map(t => [t.id, { team: t, liga: blank(), copa: blank(), otros: L.blankSan(), detail: [] }]));
     for (const m of ms) {
       const comp = m.cup ? 'copa' : 'liga';
       for (const [side, teamId, rival] of [['h', m.home, m.away], ['a', m.away, m.home]]) {
@@ -346,12 +389,15 @@ const L = {
         const list = Object.entries(m.ev[side] || {}).map(([pid, st]) => ({ p: this.player(pid), y: +st.y || 0, r: +st.r || 0 })).filter(x => x.p && (x.y || x.r));
         const y = list.reduce((s, x) => s + x.y, 0), r = list.reduce((s, x) => s + x.r, 0);
         row[comp].pj++; row[comp].y += y; row[comp].r += r;
-        if (y || r) row.detail.push({ m, comp, rival, y, r, list, amount: y * f.yellow + r * f.red });
+        const san = OTHER_SANCTIONS.map(o => ({ ...o, n: m.san[side][o.k], amount: m.san[side][o.k] * f[o.k] })).filter(x => x.n);
+        san.forEach(x => { row.otros[x.k] += x.n; });
+        if (y || r || san.length) row.detail.push({ m, comp, rival, y, r, list, san, amount: y * f.yellow + r * f.red + san.reduce((s, x) => s + x.amount, 0) });
       }
     }
     return [...rows.values()].map(r => {
       const y = r.liga.y + r.copa.y, rd = r.liga.r + r.copa.r;
-      return { ...r, pj: r.liga.pj + r.copa.pj, y, r: rd, ey: y * f.yellow, er: rd * f.red, total: y * f.yellow + rd * f.red };
+      const on = OTHER_SANCTIONS.reduce((s, o) => s + r.otros[o.k], 0), eo = OTHER_SANCTIONS.reduce((s, o) => s + r.otros[o.k] * f[o.k], 0);
+      return { ...r, pj: r.liga.pj + r.copa.pj, y, r: rd, on, ey: y * f.yellow, er: rd * f.red, eo, total: y * f.yellow + rd * f.red + eo };
     }).sort((a, b) => b.total - a.total || a.team.name.localeCompare(b.team.name, 'es'));
   },
 

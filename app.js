@@ -16,8 +16,19 @@ const NAV = [
 const PAGE_DIV = { primera: 1, segunda: 2 };
 
 /* ---------------- Versión y novedades ---------------- */
-const APP_VERSION = '1.2';
+const APP_VERSION = '1.4';
 const CHANGELOG = [
+  {
+    v: '1.4', date: '2026-11-18', items: [
+      ['lock', 'Las <b>otras sanciones</b> y sus importes se guardan en una zona privada de la base de datos, a la que solo acceden las cuentas del panel.']
+    ]
+  },
+  {
+    v: '1.3', date: '2026-11-18', items: [
+      ['gavel', 'Acta del partido: apartado <b>Otras sanciones</b> por equipo (duplicidad de dorsal, no llevar balón e incomparecencia), visible solo en administración.'],
+      ['payments', 'Admin › Sanciones: importe de cada otra sanción (0 € por defecto), columnas en la tabla y en el Excel, y suma al total de cada equipo.']
+    ]
+  },
   {
     v: '1.2', date: '2026-11-18', items: [
       ['person_off', 'Ficha del partido: opción <b>No presentado</b>. El equipo presentado gana 3-0 y suma 3 puntos; el que no se presenta pierde y se le restan 3 puntos.'],
@@ -545,9 +556,9 @@ const App = {
       $('#view').innerHTML = `<div class="card card-pad center"><span class="ms" style="font-size:40px;color:var(--loss)">cloud_off</span><h2 style="margin:8px 0">No se pudieron cargar los datos</h2><p class="muted">${esc(e.message)}</p><button class="btn btn-filled" onclick="location.reload()">Reintentar</button></div>`;
       return;
     }
-    L.load(Api.state.data, Api.state.shields);
+    L.load(Api.state.data, Api.state.shields, Api.state.priv);
     Api.onData(st => {
-      L.load(st.data, st.shields);
+      L.load(st.data, st.shields, st.priv);
       if (Dlg.anyOpen()) this.dirty = true; else this.render();
     });
     Api.onAuth(() => { if (this.route.page === 'admin' && !Dlg.anyOpen()) this.render(); });
@@ -589,7 +600,7 @@ const App = {
     // Las temporadas archivadas solo se consultan en divisiones y estadísticas; portada y admin usan siempre la actual.
     const useArchive = this.season && this.archive && (PAGE_DIV[page] || page === 'estadisticas' || page === 'copa');
     if (useArchive) L.load(this.archive.data, this.archive.shields);
-    else L.load(Api.state.data, Api.state.shields);
+    else L.load(Api.state.data, Api.state.shields, Api.state.priv);
     $$('[data-nav]').forEach(a => a.classList.toggle('active', a.dataset.nav === page));
     $('#footSeason').textContent = L.d.settings.season || '';
     $('.ver-link').textContent = 'Versión ' + APP_VERSION;
@@ -672,8 +683,9 @@ const App = {
     const next = JSON.parse(JSON.stringify(L.d));
     try {
       mutate(next);
-      await Api.save(next, Api.state.version);
-      L.load(next, Api.state.shields);
+      const priv = L.extractPrivate(next);
+      await Api.save(next, Api.state.version, priv);
+      L.load(next, Api.state.shields, Api.state.priv);
       if (Dlg.anyOpen()) this.dirty = true; else this.render();
       snack(okMsg, 'check_circle');
       return true;

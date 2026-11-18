@@ -4,6 +4,24 @@ La versión actual se muestra en el pie de página de la web. Al pulsarla, y tam
 
 ---
 
+## Versión 1.4 · 18 de noviembre de 2026
+
+### Privacidad de las otras sanciones
+- Las otras sanciones del acta y sus importes se guardan en una **zona privada** de la base de datos. Solo pueden leerlas o cambiarlas las cuentas del panel.
+- Las temporadas archivadas conservan también sus otras sanciones en esa zona privada.
+- Requiere publicar en Firebase las reglas actualizadas del archivo `firestore.rules`.
+
+---
+
+## Versión 1.3 · 18 de noviembre de 2026
+
+### Otras sanciones
+- **En el acta del partido**: apartado por equipo con **duplicidad de dorsal**, **no llevar balón** e **incomparecencia**. Solo se ve en el panel de administración, nunca en la web pública.
+- Al marcar un equipo como no presentado se anota automáticamente su incomparecencia.
+- **En Admin › Sanciones**: importe de cada concepto (0 € por defecto, lo ajusta un administrador), columnas en la tabla, detalle por partido y Excel. Se suman al total de cada equipo.
+
+---
+
 ## Versión 1.2 · 18 de noviembre de 2026
 
 ### Ficha del partido

@@ -24,11 +24,13 @@ const Api = (() => {
   let impl = null;
   const dataCbs = [];
   const authCbs = [];
-  const current = { data: null, version: 0, shields: {} };
+  // priv: otras sanciones e importes; solo se cargan con sesión iniciada en el panel.
+  const current = { data: null, version: 0, shields: {}, priv: null, privOk: false, privError: false };
+  const BLANK_PRIV = () => ({ fines: {}, matches: {} });
   let user = null;
 
   const emitData = () => dataCbs.forEach(cb => cb(current));
-  const emitAuth = () => authCbs.forEach(cb => cb(user));
+  const emitAuth = () => { impl.syncPrivate(); authCbs.forEach(cb => cb(user)); };
 
   function checkNewUser(name, password, role) {
     if (!/^[a-z0-9._-]{3,32}$/.test(name)) throw err('Nombre de usuario no válido (3-32 caracteres: letras, números, punto, guion).');
@@ -59,6 +61,7 @@ const Api = (() => {
   /* ------------------------------ FIREBASE ------------------------------ */
   function firebaseImpl(cfg) {
     let auth, db, FV;
+    let privUid = null, privUnsub = null;
     const doc = p => db.doc(p);
 
     async function loadProfile() {
@@ -90,6 +93,24 @@ const Api = (() => {
     }
 
     return {
+      // Escucha la zona privada mientras haya una cuenta del panel con sesión iniciada.
+      syncPrivate() {
+        const uid = user ? user.uid : null;
+        if (uid === privUid) return;
+        privUid = uid;
+        if (privUnsub) { privUnsub(); privUnsub = null; }
+        Object.assign(current, { priv: null, privOk: false, privError: false });
+        if (!uid) return;
+        privUnsub = doc('private/sanctions').onSnapshot(s => {
+          Object.assign(current, { priv: s.exists ? JSON.parse(s.data().json) : BLANK_PRIV(), privOk: true, privError: false });
+          emitData();
+        }, e => {
+          console.error(e);
+          Object.assign(current, { priv: null, privOk: false, privError: true });
+          emitData();
+        });
+      },
+
       async init() {
         const base = `https://www.gstatic.com/firebasejs/${FB_VER}/`;
         await loadScript(base + 'firebase-app-compat.js');
@@ -164,7 +185,7 @@ const Api = (() => {
 
       logout: () => auth.signOut(),
 
-      async save(data, version) {
+      async save(data, version, priv) {
         requireRole(ROLES);
         const ref = doc('league/main');
         return db.runTransaction(async tx => {
@@ -172,6 +193,7 @@ const Api = (() => {
           const v = s.exists ? s.data().version : 0;
           if (v !== version) throw err('Los datos han cambiado en otro dispositivo.', 409);
           tx.set(ref, { json: JSON.stringify(data), version: v + 1, updatedAt: FV.serverTimestamp(), updatedBy: user.username });
+          if (priv) tx.set(doc('private/sanctions'), { json: JSON.stringify(priv), updatedAt: FV.serverTimestamp(), updatedBy: user.username });
           return v + 1;
         });
       },
@@ -182,9 +204,17 @@ const Api = (() => {
       },
 
       // Temporadas archivadas: una copia completa e inalterable por temporada.
-      async archiveSeason(id, { name, data, shields }) {
+      async archiveSeason(id, { name, data, shields, priv }) {
         requireRole(['admin']);
-        await doc('seasons/' + id).set({ name, json: JSON.stringify(data), shields: JSON.stringify(shields || {}), archivedAt: FV.serverTimestamp(), by: user.username });
+        const b = db.batch();
+        b.set(doc('seasons/' + id), { name, json: JSON.stringify(data), shields: JSON.stringify(shields || {}), archivedAt: FV.serverTimestamp(), by: user.username });
+        if (priv) b.set(doc('private/season-' + id), { json: JSON.stringify(priv) });
+        await b.commit();
+      },
+      async getSeasonPrivate(id) {
+        requireRole(ROLES);
+        const s = await doc('private/season-' + id).get();
+        return s.exists ? JSON.parse(s.data().json) : null;
       },
       async getSeason(id) {
         const s = await doc('seasons/' + id).get();
@@ -194,7 +224,10 @@ const Api = (() => {
       },
       async deleteSeason(id) {
         requireRole(['admin']);
-        await doc('seasons/' + id).delete();
+        const b = db.batch();
+        b.delete(doc('seasons/' + id));
+        b.delete(doc('private/season-' + id));
+        await b.commit();
       },
 
       async listUsers() {
@@ -300,6 +333,9 @@ const Api = (() => {
     }
 
     return {
+      syncPrivate() {
+        Object.assign(current, { priv: user ? (ls.get('lo_local_private') || BLANK_PRIV()) : null, privOk: !!user, privError: false });
+      },
       async init() {
         if (!ls.get(K.liga)) ls.set(K.liga, { version: 0, data: await loadSeed() });
         if (!users().length) setUsers([{ uid: 'u-admin', username: 'admin', role: 'admin', mustChange: true, hash: await hash('admin') }]);
@@ -321,11 +357,12 @@ const Api = (() => {
         return user;
       },
       async logout() { ls.del(K.session); user = null; emitAuth(); },
-      async save(data, version) {
+      async save(data, version, priv) {
         requireRole(ROLES);
         const l = ls.get(K.liga);
         if (l.version !== version) throw err('Los datos han cambiado en otra pestaña.', 409);
         ls.set(K.liga, { version: version + 1, data });
+        if (priv) ls.set('lo_local_private', priv);
         readData();
         return version + 1;
       },
@@ -337,10 +374,15 @@ const Api = (() => {
         current.shields = s;
         emitData();
       },
-      async archiveSeason(id, { name, data, shields }) {
+      async archiveSeason(id, { name, data, shields, priv }) {
         requireRole(['admin']);
         ls.set('lo_local_season_' + id, { name, data, shields: shields || {} });
         if (!ls.get('lo_local_season_' + id)) throw err('No hay espacio en el navegador para archivar la temporada.');
+        if (priv) ls.set('lo_local_private_season_' + id, priv);
+      },
+      async getSeasonPrivate(id) {
+        requireRole(ROLES);
+        return ls.get('lo_local_private_season_' + id);
       },
       async getSeason(id) {
         const s = ls.get('lo_local_season_' + id);
@@ -350,6 +392,7 @@ const Api = (() => {
       async deleteSeason(id) {
         requireRole(['admin']);
         ls.del('lo_local_season_' + id);
+        ls.del('lo_local_private_season_' + id);
       },
       async listUsers() {
         requireRole(['admin']);
@@ -425,15 +468,19 @@ const Api = (() => {
     onAuth(cb) { authCbs.push(cb); },
     login: (u, p) => impl.login(u, p),
     logout: () => impl.logout(),
-    async save(data, version) {
-      const v = await impl.save(data, version);
+    async save(data, version, priv) {
+      // Sin acceso a la zona privada no se escribe en ella, para no borrar lo que ya haya.
+      const p = current.privOk ? priv : null;
+      const v = await impl.save(data, version, p);
       current.data = data;
       current.version = v;
+      if (p) current.priv = p;
       return v;
     },
     saveShield: (id, url) => impl.saveShield(id, url),
     archiveSeason: (id, payload) => impl.archiveSeason(id, payload),
     getSeason: id => impl.getSeason(id),
+    getSeasonPrivate: id => impl.getSeasonPrivate(id),
     deleteSeason: id => impl.deleteSeason(id),
     listUsers: () => impl.listUsers(),
     createUser: u => impl.createUser(u),

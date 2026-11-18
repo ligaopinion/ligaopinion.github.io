@@ -16,7 +16,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Roboto:wght@400;500;700&display=swap">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,400..600,0..1,0&display=block">
-  <link rel="stylesheet" href="styles.css">
+  <!-- ?v= obliga a los navegadores a descargar los archivos nuevos: cambiarlo en cada versión -->
+  <link rel="stylesheet" href="styles.css?v=1.4">
   <script>
     try { var t = localStorage.getItem('lo_theme'); if (t) document.documentElement.setAttribute('data-theme', t); } catch (e) {}
   </script>
@@ -40,7 +41,7 @@
 
   <footer class="site">
     <span><img src="logo-192.png" alt="">Liga Success Opinión Futsal Sevilla</span>
-    <span><span id="footSeason"></span> · <button type="button" class="ver-link" data-act="changelog" title="Ver novedades">Versión 1.2</button></span>
+    <span><span id="footSeason"></span> · <button type="button" class="ver-link" data-act="changelog" title="Ver novedades">Versión 1.4</button></span>
   </footer>
 
   <nav class="bottomnav" id="bottomnav" aria-label="Secciones"></nav>
@@ -50,12 +51,12 @@
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" defer></script>
   <script src="firebase-config.js"></script>
-  <script src="seed.js"></script>
-  <script src="logo-data.js"></script>
-  <script src="api.js"></script>
-  <script src="league.js"></script>
-  <script src="app.js"></script>
-  <script src="admin.js"></script>
+  <script src="seed.js?v=1.4"></script>
+  <script src="logo-data.js?v=1.4"></script>
+  <script src="api.js?v=1.4"></script>
+  <script src="league.js?v=1.4"></script>
+  <script src="app.js?v=1.4"></script>
+  <script src="admin.js?v=1.4"></script>
   <script>App.start();</script>
 </body>
 </html>

@@ -665,3 +665,17 @@ footer.site img { width: 34px; border-radius: 50%; vertical-align: middle; margi
 
 /* v1.2: no presentado */
 .np-tag { display: inline-block; margin: 0 5px; padding: 1px 5px; border-radius: 5px; background: var(--loss); color: #fff; font: 800 10px/1.4 var(--font); letter-spacing: .3px; vertical-align: 1px; }
+
+/* v1.3: otras sanciones */
+.san-head { display: flex; gap: 10px; align-items: flex-start; margin: 20px 0 12px; }
+.san-head .ms { color: var(--loss); }
+.san-head b { font: 800 19px/1.1 var(--font-display); text-transform: uppercase; }
+.san-head p { margin: 2px 0 0; font-size: 12.5px; color: var(--muted); }
+#edSan .pname { white-space: normal; }
+#edSan .stepper b { min-width: 26px; }
+.fines-kpis { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.fines-tbl th.grp.otros { color: var(--loss); }
+.fbar .o { background: var(--primary); }
+.poster .fines-tbl .fine-bar { display: none !important; }
+.poster .fines-tbl th, .poster .fines-tbl td { padding: 8px 4px; font-size: 12px; }
+.poster .fines-tbl .shield { width: 22px; height: 22px; }
