@@ -4,6 +4,18 @@ La versión actual se muestra en el pie de página de la web. Al pulsarla, y tam
 
 ---
 
+## Versión 1.2 · 18 de noviembre de 2026
+
+### Ficha del partido
+- **No presentado**: se elige qué equipo no se presenta. El presentado gana 3-0 y suma 3 puntos; al que no se presenta se le registra la derrota 0-3 y se le **restan 3 puntos**. En copa, el presentado pasa de ronda.
+- **Equipo sustituido**: para los partidos anteriores a la entrada de un equipo que sustituye a otro. El rival conserva su 3-0 y sus 3 puntos, y el partido no computa al equipo nuevo.
+- Estos partidos se marcan en el calendario y en el resumen, y no llevan goles ni tarjetas.
+
+### Copa
+- **Adaptar al cuadro oficial**: en *Admin › Copa*, una copa creada con el formato antiguo se convierte al cuadro oficial (códigos de cruce y paso automático de ganadores) conservando equipos, fechas, resultados, goleadores y tarjetas.
+
+---
+
 ## Versión 1.1 · 4 de noviembre de 2026
 
 ### Copa Opinión Success

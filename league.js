@@ -96,6 +96,9 @@ const L = {
     m.ev.hx = +m.ev.hx || 0;
     m.ev.ax = +m.ev.ax || 0;
     m.status = m.status || 'pending';
+    // Lado ('h' | 'a') que no se presentó, o que no computa por ser un equipo que sustituyó a otro.
+    m.noShow = m.noShow === 'h' || m.noShow === 'a' ? m.noShow : null;
+    m.replaced = m.replaced === 'h' || m.replaced === 'a' ? m.replaced : null;
   },
 
   newCupMatch(label = '') {
@@ -121,6 +124,42 @@ const L = {
       rounds[ri].matches[mi].src = { h: find(rh, lh), a: find(ra, la) };
     }));
     return { name: DIV_NAME.c, rounds, preset: !!preset };
+  },
+
+  // Copa creada con el formato antiguo: rondas de 4-8-4-2-1 partidos y sin códigos de cruce.
+  cupIsLegacy(cup) {
+    if (!cup) return false;
+    return cup.rounds.map(r => r.matches.length).join('-') === '4-8-4-2-1' && !cup.rounds.some(r => r.matches.some(m => m.label));
+  },
+
+  // Pasa esa copa al cuadro oficial conservando equipos, resultados, tarjetas y fechas ya anotados.
+  upgradeCup(cup, season, teams) {
+    const next = L.buildCup(season, teams);
+    delete next.preset;
+    next.name = cup.name;
+    const merge = (to, from) => {
+      if (from.home || from.away || from.status !== 'pending') {
+        for (const k of ['home', 'away', 'status', 'ev', 'pen', 'noShow', 'replaced']) to[k] = from[k];
+      }
+      to.date = from.date || to.date;
+      to.time = from.time || to.time;
+    };
+    // Ronda 1: cada partido va al cruce oficial con los mismos equipos; si no coincide, al primer hueco libre.
+    const key = m => [m.home, m.away].sort().join('|');
+    const free = [...next.rounds[0].matches];
+    const take = i => free.splice(i, 1)[0];
+    const old = cup.rounds[0].matches;
+    const rest = old.filter(m => {
+      const i = free.findIndex(x => key(x) === key(m));
+      if (i < 0) return true;
+      merge(take(i), m);
+      return false;
+    });
+    rest.forEach(m => merge(take(0), m));
+    // Resto de rondas por orden: los 8 octavos se reparten entre Octavos 1 y Octavos 2.
+    const later = [...next.rounds[1].matches, ...next.rounds[2].matches, ...next.rounds[3].matches, ...next.rounds[4].matches, ...next.rounds[5].matches];
+    cup.rounds.slice(1).flatMap(r => r.matches).forEach((m, i) => merge(later[i], m));
+    return next;
   },
 
   uid(prefix) { return prefix + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); },
@@ -157,8 +196,19 @@ const L = {
   played(m) { return m.status === 'played'; },
   score(m) {
     if (!this.played(m)) return null;
+    // Incomparecencia o equipo sustituido: resultado administrativo 3-0 para el otro equipo.
+    const lost = m.noShow || m.replaced;
+    if (lost) return lost === 'h' ? { h: 0, a: 3 } : { h: 3, a: 0 };
     const sum = side => Object.values(m.ev[side] || {}).reduce((s, x) => s + (+x.g || 0), 0);
     return { h: sum('h') + (+m.ev.hx || 0), a: sum('a') + (+m.ev.ax || 0) };
+  },
+  // Explicación del resultado administrativo para el resumen del partido.
+  walkoverNote(m) {
+    const lost = m.noShow || m.replaced;
+    if (!lost || !this.played(m)) return '';
+    const out = this.team(lost === 'h' ? m.home : m.away).name, win = this.team(lost === 'h' ? m.away : m.home).name;
+    if (m.replaced) return `Partido anterior a la incorporación de ${out}: 3-0 para ${win}. No computa en la clasificación de ${out}.`;
+    return `${out} no se presentó: 3-0 para ${win}${m.cup ? '' : ` y ${out} pierde 3 puntos`}.`;
   },
 
   standings(div) {
@@ -167,12 +217,12 @@ const L = {
       const s = this.score(m);
       if (!s) continue;
       const h = rows.get(m.home), a = rows.get(m.away);
-      for (const [r, gf, gc] of [[h, s.h, s.a], [a, s.a, s.h]]) {
-        if (!r) continue;
+      for (const [r, gf, gc, side] of [[h, s.h, s.a, 'h'], [a, s.a, s.h, 'a']]) {
+        if (!r || m.replaced === side) continue;
         r.pj++; r.gf += gf; r.gc += gc;
         if (gf > gc) { r.pg++; r.pts += 3; r.form.push('G'); }
         else if (gf === gc) { r.pe++; r.pts += 1; r.form.push('E'); }
-        else { r.pp++; r.form.push('P'); }
+        else { r.pp++; r.form.push('P'); if (m.noShow === side) r.pts -= 3; }
       }
     }
     return [...rows.values()]
@@ -292,7 +342,7 @@ const L = {
       const comp = m.cup ? 'copa' : 'liga';
       for (const [side, teamId, rival] of [['h', m.home, m.away], ['a', m.away, m.home]]) {
         const row = rows.get(teamId);
-        if (!row) continue;
+        if (!row || m.replaced === side) continue;
         const list = Object.entries(m.ev[side] || {}).map(([pid, st]) => ({ p: this.player(pid), y: +st.y || 0, r: +st.r || 0 })).filter(x => x.p && (x.y || x.r));
         const y = list.reduce((s, x) => s + x.y, 0), r = list.reduce((s, x) => s + x.r, 0);
         row[comp].pj++; row[comp].y += y; row[comp].r += r;

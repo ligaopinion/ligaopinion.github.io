@@ -53,6 +53,8 @@ window.FIREBASE_CONFIG = {
 ## Uso diario
 
 * **Anotar un resultado**: *Admin › Partidos y resultados*, elige la división y la jornada, pulsa el partido y usa **+ / −** para los goles, las amarillas y las rojas de cada jugador. El marcador se calcula solo. Al pulsar **Guardar**, la clasificación, los rankings y la portada se actualizan al instante para todos.
+* **No presentado**: en la ficha del partido, en *Presentación de los equipos*, elige el equipo que no se presenta. El otro gana 3-0 y suma 3 puntos, y al ausente se le restan 3 puntos.
+* **Equipo sustituido**: en esa misma lista, para partidos anteriores a la entrada de un equipo nuevo. El rival conserva el 3-0 y el partido no computa al equipo nuevo.
 * **Partido aplazado**: cambia el estado a *Aplazado* y, cuando se juegue, actualiza la fecha.
 * **Instantáneas**: debajo de cada jornada, clasificación, ranking y resumen hay un botón **Capturar instantánea**, que genera una imagen con el logo para Instagram o WhatsApp. Se puede descargar, copiar o, en el móvil, compartir directamente.
 * **Nueva temporada** (*Admin › Temporadas › Iniciar nueva temporada*, solo administradores):

@@ -147,6 +147,7 @@ const Admin = {
       case 'cup-create': this.createCup(); break;
       case 'round-add': this.addRound(); break;
       case 'cup-delete': this.deleteCup(); break;
+      case 'cup-upgrade': this.upgradeCup(); break;
       case 'round-del': this.deleteRound(el.dataset.r); break;
       case 'cm-add': this.addCupMatch(el.dataset.r); break;
       case 'cm-edit': this.openMatch(el.dataset.id, el.dataset.r); break;
@@ -243,6 +244,7 @@ const Admin = {
           <label class="field"><span>Penaltis local (solo si hay empate)</span><input id="edPh" type="number" min="0" max="99" value="${m.pen ? m.pen.h : ''}" inputmode="numeric"></label>
           <label class="field"><span>Penaltis visitante (solo si hay empate)</span><input id="edPa" type="number" min="0" max="99" value="${m.pen ? m.pen.a : ''}" inputmode="numeric"></label>
         </div>${m.src ? `<p class="muted" style="margin:-6px 0 14px;font-size:12.5px">Este cruce lo juegan el <b>${esc(L.cupSrcText(m, 'home'))}</b> y el <b>${esc(L.cupSrcText(m, 'away'))}</b>; se rellenan solos cuando esos partidos tienen resultado.</p>` : ''}${prevWinners.size ? '<p class="muted" style="margin:-6px 0 14px;font-size:12.5px">★ Equipo clasificado en la ronda anterior</p>' : ''}` : ''}
+        <div id="edShow"></div>
         <div id="edScore"></div>
         <div id="edCols" class="ed-cols" style="margin-top:16px"></div>
       </div>
@@ -258,7 +260,7 @@ const Admin = {
     if (isCup) $('#edLabel').addEventListener('input', e => { m.label = e.target.value.trim().toUpperCase(); });
     if (!isCup) {
       $('#edDiv').addEventListener('change', e => {
-        m.div = +e.target.value; m.home = ''; m.away = ''; m.ev = { h: {}, a: {}, hx: 0, ax: 0 };
+        m.div = +e.target.value; m.home = ''; m.away = ''; m.ev = { h: {}, a: {}, hx: 0, ax: 0 }; m.noShow = m.replaced = null;
         $('#edHome').innerHTML = teamOpts(''); $('#edAway').innerHTML = teamOpts('');
         $('#edBadge').className = `div-badge sm d${m.div}`; $('#edBadge').textContent = DIV_TAG[m.div];
         this.renderEd();
@@ -267,10 +269,41 @@ const Admin = {
     }
     $('#edDate').addEventListener('change', e => { m.date = e.target.value; });
     $('#edTime').addEventListener('change', e => { m.time = e.target.value; });
-    $('#edStatus').addEventListener('change', e => { m.status = e.target.value; this.renderEd(); });
-    $('#edHome').addEventListener('change', e => { m.home = e.target.value; m.ev.h = {}; m.ev.hx = 0; this.renderEd(); });
-    $('#edAway').addEventListener('change', e => { m.away = e.target.value; m.ev.a = {}; m.ev.ax = 0; this.renderEd(); });
+    $('#edStatus').addEventListener('change', e => {
+      m.status = e.target.value;
+      if (m.status !== 'played') m.noShow = m.replaced = null;
+      this.renderEd();
+    });
+    $('#edHome').addEventListener('change', e => { m.home = e.target.value; m.ev.h = {}; m.ev.hx = 0; m.noShow = m.replaced = null; this.renderEd(); });
+    $('#edAway').addEventListener('change', e => { m.away = e.target.value; m.ev.a = {}; m.ev.ax = 0; m.noShow = m.replaced = null; this.renderEd(); });
+    $('#edShow').addEventListener('change', e => {
+      const [kind, side] = e.target.value.split('-');
+      m.noShow = kind === 'ns' ? side : null;
+      m.replaced = kind === 'rp' ? side : null;
+      if (kind) { m.status = 'played'; $('#edStatus').value = 'played'; }
+      this.renderEd();
+    });
     this.renderEd();
+  },
+
+  // Selector de presentación: ambos equipos, no presentado o equipo sustituido.
+  renderShow() {
+    const m = this.ed.m, box = $('#edShow');
+    if (!m.home || !m.away) { box.innerHTML = ''; return; }
+    const h = L.team(m.home).name, a = L.team(m.away).name;
+    const cur = m.noShow ? `ns-${m.noShow}` : m.replaced ? `rp-${m.replaced}` : '';
+    const opt = (v, text) => `<option value="${v}" ${cur === v ? 'selected' : ''}>${esc(text)}</option>`;
+    const hasEvents = ['h', 'a'].some(s => Object.keys(m.ev[s]).length);
+    const note = m.noShow
+      ? `<b>${esc(m.noShow === 'h' ? h : a)}</b> pierde 3-0${this.ed.roundId ? '' : ' y se le restan 3 puntos'}. <b>${esc(m.noShow === 'h' ? a : h)}</b> gana${this.ed.roundId ? ' y pasa de ronda' : ' y suma 3 puntos'}.`
+      : m.replaced ? `<b>${esc(m.replaced === 'h' ? a : h)}</b> conserva el 3-0 y sus 3 puntos. A <b>${esc(m.replaced === 'h' ? h : a)}</b> este partido no le computa.` : '';
+    box.innerHTML = `<label class="field" style="margin-bottom:16px"><span>Presentación de los equipos</span><select id="edShowSel">
+        ${opt('', 'Se presentan los dos equipos')}
+        ${opt('ns-h', `No se presenta ${h}`)}
+        ${opt('ns-a', `No se presenta ${a}`)}
+        ${this.ed.roundId ? '' : `${opt('rp-h', `Equipo sustituido: no computa a ${h}`)}${opt('rp-a', `Equipo sustituido: no computa a ${a}`)}`}
+      </select></label>
+      ${note ? `<div class="alert warn"><span class="ms">person_off</span><p>${note}${hasEvents ? ' Al guardar se borrarán los goles y tarjetas anotados en este partido.' : ''}</p></div>` : ''}`;
   },
 
   edPlayers(side) {
@@ -287,8 +320,16 @@ const Admin = {
 
   edScoreVal() {
     const m = this.ed.m;
+    const lost = m.noShow || m.replaced;
+    if (lost) return lost === 'h' ? { h: 0, a: 3 } : { h: 3, a: 0 };
     const sum = s => Object.values(m.ev[s]).reduce((a, x) => a + (+x.g || 0), 0);
     return { h: sum('h') + m.ev.hx, a: sum('a') + m.ev.ax };
+  },
+
+  // Un resultado administrativo no lleva goles ni tarjetas.
+  edClearWalkover() {
+    const m = this.ed.m;
+    if (m.noShow || m.replaced) m.ev = { h: {}, a: {}, hx: 0, ax: 0 };
   },
 
   renderEd() {
@@ -296,6 +337,7 @@ const Admin = {
     const h = m.home ? L.team(m.home) : null, a = m.away ? L.team(m.away) : null;
     const sc = this.edScoreVal();
     const st = { played: 'Finalizado', pending: 'Pendiente', postponed: 'Aplazado' }[m.status];
+    this.renderShow();
     $('#edScore').innerHTML = `<div class="score-big">
       <div class="t">${h ? shieldImg(h, 'lg') : ''}<span>${h ? esc(h.name) : 'Local'}</span></div>
       <div style="text-align:center"><div class="s">${sc.h} - ${sc.a}</div><span class="tag ${m.status}" style="background:rgba(255,255,255,.15);color:#fff">${st}</span></div>
@@ -320,7 +362,7 @@ const Admin = {
         <div class="quick-add"><input class="input num" id="qn-${side}" placeholder="Dorsal" inputmode="numeric"><input class="input" id="qp-${side}" placeholder="Añadir jugador rápido"><button class="btn btn-tonal btn-sm" data-act="qadd" data-side="${side}"><span class="ms">person_add</span></button></div>
       </div>`;
     };
-    $('#edCols').innerHTML = col('h') + col('a');
+    $('#edCols').innerHTML = m.noShow || m.replaced ? '' : col('h') + col('a');
   },
 
   step(el) {
@@ -355,6 +397,7 @@ const Admin = {
     if (!m.home || !m.away) return snack('Elige los dos equipos.', 'error');
     if (m.home === m.away) return snack('Un equipo no puede jugar contra sí mismo.', 'error');
     if (!m.date || !m.time) return snack('Indica fecha y hora.', 'error');
+    this.edClearWalkover();
     for (const s of ['h', 'a']) for (const [pid, e] of Object.entries(m.ev[s])) if (!(+e.g || +e.y || +e.r)) delete m.ev[s][pid];
     const ok = await App.commit(d => {
       d.players.push(...newPlayers);
@@ -385,6 +428,7 @@ const Admin = {
     const sc = this.edScoreVal();
     if (m.status === 'played' && sc.h === sc.a && (!m.pen || m.pen.h === m.pen.a)) return snack('En copa, si hay empate indica el resultado de los penaltis (con un ganador).', 'error');
     if (m.status !== 'played' || sc.h !== sc.a) m.pen = null;
+    this.edClearWalkover();
     for (const s of ['h', 'a']) for (const [pid, e] of Object.entries(m.ev[s])) if (!(+e.g || +e.y || +e.r)) delete m.ev[s][pid];
     m.cup = true;
     const ok = await App.commit(d => {
@@ -433,6 +477,7 @@ const Admin = {
         <a class="btn btn-text btn-sm" href="#/copa"><span class="ms">account_tree</span>Ver cuadro</a>
         ${isAdmin ? '<button class="btn btn-outline btn-sm" data-act="round-add"><span class="ms">add</span>Añadir ronda</button><button class="btn btn-danger btn-sm" data-act="cup-delete"><span class="ms">delete</span>Eliminar copa</button>' : ''}
       </div>
+      ${isAdmin && L.cupIsLegacy(cup) ? `<div class="alert warn" style="margin:16px 16px 0;flex-wrap:wrap"><span class="ms">account_tree</span><p style="flex:1;min-width:220px">Esta copa usa el formato antiguo. Adáptala al <b>cuadro oficial</b> (Ronda 1, Octavos 1 y 2, Cuartos, Semifinal y Final). Se conservan los resultados ya anotados.</p><button class="btn btn-filled btn-sm" data-act="cup-upgrade"><span class="ms">account_tree</span>Adaptar al cuadro oficial</button></div>` : ''}
       <div class="alert info" style="margin:16px 16px 0"><span class="ms">touch_app</span><p>Pulsa un partido para elegir sus equipos, fecha y hora, y anotar el resultado con goleadores, amonestaciones y expulsiones. Si hay empate, indica los penaltis. En cada ronda, ★ marca los equipos clasificados en la anterior.</p></div>
       ${rounds}`;
   },
@@ -448,6 +493,12 @@ const Admin = {
       delete cup.preset;
       d.cup = cup;
     }, hasPreset ? 'Copa creada con el cuadro oficial. Elige ahora los equipos de los octavos.' : 'Copa creada. Ahora elige los equipos de la Ronda 1.');
+  },
+
+  async upgradeCup() {
+    const played = L.cupMatches().filter(m => L.played(m)).length;
+    if (!await Dlg.confirm(`¿Adaptar la copa al <b>cuadro oficial</b>? Se conservan los equipos, fechas y <b>${played} ${played === 1 ? 'resultado' : 'resultados'}</b> ya anotados, con sus goleadores y tarjetas.`, 'Adaptar copa', false)) return;
+    await App.commit(d => { d.cup = L.upgradeCup(d.cup, d.settings.season, d.teams); }, 'Copa adaptada al cuadro oficial');
   },
 
   // Para empezar de nuevo (por ejemplo, si se creó con un formato equivocado).

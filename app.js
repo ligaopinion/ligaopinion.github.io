@@ -16,8 +16,15 @@ const NAV = [
 const PAGE_DIV = { primera: 1, segunda: 2 };
 
 /* ---------------- Versión y novedades ---------------- */
-const APP_VERSION = '1.1';
+const APP_VERSION = '1.2';
 const CHANGELOG = [
+  {
+    v: '1.2', date: '2026-11-18', items: [
+      ['person_off', 'Ficha del partido: opción <b>No presentado</b>. El equipo presentado gana 3-0 y suma 3 puntos; el que no se presenta pierde y se le restan 3 puntos.'],
+      ['swap_horiz', 'Ficha del partido: opción <b>Equipo sustituido</b>. El rival conserva su 3-0, pero el partido no computa al equipo que entró después en la liga.'],
+      ['account_tree', 'Admin › Copa: botón para adaptar al cuadro oficial una copa ya creada, sin perder sus resultados.']
+    ]
+  },
   {
     v: '1.1', date: '2026-11-04', items: [
       ['emoji_events', 'Nueva sección <b>Copa Opinión Success</b> en el menú, con el cuadro oficial: Ronda 1, Octavos 1, Octavos 2, Cuartos, Semifinal y Final.'],
@@ -99,12 +106,14 @@ const Dlg = {
 };
 
 /* ---------------- Componentes ---------------- */
+const NP_TAG = '<span class="np-tag" title="No presentado">NP</span>';
 function matchRow(m) {
   const h = L.team(m.home), a = L.team(m.away), sc = L.score(m);
   let mid = '<div class="mscore vs">VS</div>';
   let res = ['', ''];
   if (sc) {
-    mid = `<div class="mscore">${sc.h}<i>-</i>${sc.a}${m.pen ? `<small class="pen">${m.pen.h}-${m.pen.a} pen.</small>` : ''}</div>`;
+    const note = m.noShow ? 'No presentado' : m.replaced ? 'Sustituido' : m.pen ? `${m.pen.h}-${m.pen.a} pen.` : '';
+    mid = `<div class="mscore">${sc.h}<i>-</i>${sc.a}${note ? `<small class="pen">${note}</small>` : ''}</div>`;
     const w = m.cup ? L.cupWinner(m) : (sc.h > sc.a ? m.home : sc.h < sc.a ? m.away : null);
     res = w === m.home ? ['win', 'lose'] : w === m.away ? ['lose', 'win'] : ['', ''];
   } else if (m.status === 'postponed') {
@@ -115,9 +124,9 @@ function matchRow(m) {
     <div class="mdiv" title="${DIV_NAME[dk]}">${m.cup ? '<span class="ms fill" style="font-size:20px">emoji_events</span><small>COPA</small>' : `${DIV_TAG[dk]}<small>DIV</small>`}</div>
     <div class="mbody">
       <div class="mtime">${esc(m.time)}<small>${D.dayShort(m.date)} ${D.dm(m.date)}</small></div>
-      <div class="mteam home ${res[0]}"><span class="tname">${teamName(h)}</span>${shieldImg(h)}</div>
+      <div class="mteam home ${res[0]}"><span class="tname">${m.noShow === 'h' ? NP_TAG : ''}${teamName(h)}</span>${shieldImg(h)}</div>
       ${mid}
-      <div class="mteam away ${res[1]}">${shieldImg(a)}<span class="tname">${teamName(a)}</span></div>
+      <div class="mteam away ${res[1]}">${shieldImg(a)}<span class="tname">${teamName(a)}${m.noShow === 'a' ? NP_TAG : ''}</span></div>
       <div class="mact">${sc ? `<button class="btn btn-tonal btn-sm" data-act="summary" data-id="${m.id}"><span class="ms">summarize</span>Resumen</button>` : ''}</div>
     </div>
   </div>`;
@@ -343,7 +352,7 @@ function cupCard(m) {
     const t = id ? L.team(id) : null;
     const cls = w ? (w === id ? 'win' : 'lose') : '';
     return `<div class="bteam ${cls}">${t ? shieldImg(t) : '<span class="shield ph"></span>'}
-      <span class="tname">${t ? esc(t.short || t.name) : `<i>${esc(L.cupSrcText(m, key) || 'Por definir')}</i>`}</span>
+      <span class="tname">${t ? esc(t.short || t.name) : `<i>${esc(L.cupSrcText(m, key) || 'Por definir')}</i>`}${m.noShow === key[0] ? NP_TAG : ''}</span>
       <b>${sc ? goals : ''}${sc && m.pen ? `<small>(${pen})</small>` : ''}</b></div>`;
   };
   const when = m.status === 'postponed' ? 'Aplazado' : m.date ? `${D.dayShort(m.date)} ${D.dm(m.date)}${m.time ? ' · ' + esc(m.time) : ''}` : 'Fecha por definir';
@@ -402,9 +411,10 @@ function openSummary(id) {
           ${m.pen ? `<div class="meta" style="font-size:14px;color:#fff">Penaltis: ${m.pen.h} - ${m.pen.a}</div>` : ''}
           <div class="meta">${esc(title)}${m.date ? ' · ' + esc(D.dayLong(m.date)) : ''}${m.time ? ' · ' + esc(m.time) : ''}</div>
         </div>
+        ${L.walkoverNote(m) ? `<div class="sum-section"><p style="margin:0">${esc(L.walkoverNote(m))}</p></div>` : `
         ${section('Goles y goleadores', '<span class="ms">sports_soccer</span>', 'goals', ball, true)}
         ${section('Amonestaciones', '<span class="card-ico y"></span>', 'yellow', yc, false)}
-        ${section('Expulsiones', '<span class="card-ico r"></span>', 'red', rc, false)}
+        ${section('Expulsiones', '<span class="card-ico r"></span>', 'red', rc, false)}`}
       </div>
     </div>
     <div class="dlg-foot">${shotBtn('shot-summary', `${h.short || h.name} ${sc ? sc.h + '-' + sc.a : ''} ${a.short || a.name}`, `${title}${m.date ? ' · ' + D.dm(m.date) : ''}`)}<button class="btn btn-filled btn-sm" data-act="close">Cerrar</button></div>`, '');
